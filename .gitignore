@@ -1,0 +1,9 @@
+gifsplanation
+notebooks/gifsplanation/
+.DS_Store
+.vscode
+build
+xray_tools.egg-info
+.ipynb_checkpoints
+*.png
+*.tar
