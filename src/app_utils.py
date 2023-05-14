@@ -111,7 +111,7 @@ def predict(image, model_choice):
         model.eval()
         outputs = model(img)
         scores = (
-            outputs[0].detach().numpy().astype(float)
+            outputs[0].detach().numpy().astype(np.float)
         )  # conversion to np.float is needed for visualization with gr.Label
         diagnosis = [
             "Yes" if scores[i] > 0.5 else "No" for i in range(len(model.pathologies))

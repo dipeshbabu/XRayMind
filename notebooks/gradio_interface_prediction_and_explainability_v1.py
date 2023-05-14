@@ -72,7 +72,7 @@ def predict(image, model_choice):
 
     outputs = model(img)
     scores = (
-        outputs[0].detach().numpy().astype(float)
+        outputs[0].detach().numpy().astype(np.float)
     )  # conversion to np.float is needed for visualization with gr.Label
     label = dict(zip(model.pathologies, scores))
     return label
