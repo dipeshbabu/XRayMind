@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 from captum.attr import IntegratedGradients, Saliency, InputXGradient
-from gifsplanation import attribution
+from .gifsplanation import attribution
 from .en_model import ChestXrayEnsemble
 
 n_classes = 14
