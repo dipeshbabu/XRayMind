@@ -13,7 +13,7 @@ setup(
         "torchxrayvision>=0.0.38",
         "captum>=0.5.0",
         "gradio>=3.4.1",
-        "scikit-learn>=0.24.2",
+        "sklearn",
         "pandas",
     ],
 )
