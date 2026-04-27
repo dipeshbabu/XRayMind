@@ -1,10 +1,19 @@
 # XRayMind
 
-XRayMind is an explainable chest X-ray research prototype built around TorchXRayVision models, Captum attribution methods, reliability evaluation, reporting, DICOM ingestion, hosted API inference, uncertainty, model cards, dataset cards, selective prediction, ensemble disagreement, conformal prediction sets, local case review workflows, and a lightweight Gradio interface. The project is intended for AI/ML research demos, model inspection, benchmarking, and educational exploration of chest radiography classifiers.
+XRayMind is an explainable chest X-ray research prototype built around TorchXRayVision models, Captum attribution methods, reliability evaluation, reporting, DICOM ingestion, hosted API inference, uncertainty, model cards, dataset cards, selective prediction, ensemble disagreement, conformal prediction sets, local case review workflows, exportable review datasets, operational monitoring snapshots, and a lightweight Gradio interface. The project is intended for AI/ML research demos, model inspection, benchmarking, and educational exploration of chest radiography classifiers.
 
 > **Important:** XRayMind is not a medical device and is not for clinical diagnosis, treatment, or triage. Outputs must be reviewed by qualified clinical professionals.
 
 ---
+
+## What is new in v1.1
+
+- Case export utilities in `xraymind/export.py` for JSONL/CSV review datasets.
+- Export manifests with file paths, row counts, filters, SHA-256 checksums, and responsible-use disclaimer.
+- Monitoring snapshots in `xraymind/monitoring.py` for review rate, low-confidence rate, disagreement rate, flagged/deferred/urgent rates, status counts, decision counts, and top alert labels.
+- Simple drift comparison against a previous monitoring snapshot.
+- Standalone scripts: `scripts/export_cases.py` and `scripts/monitor_cases.py`.
+- Tests for export integrity, reviewer disagreement analytics, and drift alerts.
 
 ## What is new in v1.0
 
@@ -46,17 +55,6 @@ XRayMind is an explainable chest X-ray research prototype built around TorchXRay
 - Automatic operating-point selection with `--max-risk` and `--min-coverage`.
 - Markdown selective prediction reports and risk-coverage plots.
 - Dedicated workflow guide in `docs/V0_7_SELECTIVE_PREDICTION.md`.
-
-## What changed in v0.6
-
-- Multi-model benchmark runner for folder/CSV chest X-ray datasets.
-- Reusable evaluation utilities in `xraymind/evaluation.py`.
-- Dataset-card generation for benchmark datasets.
-- Per-model benchmark model-card generation.
-- Combined leaderboard across TorchXRayVision models.
-- Optional subgroup evaluation for metadata slices such as sex, site, age group, or view position.
-- Test-time augmentation uncertainty helper and `xraymind tta` CLI command.
-- Dedicated research workflow guide in `docs/V0_6_RESEARCH_EVAL.md`.
 
 ---
 
@@ -142,6 +140,31 @@ Show the dashboard:
 ```bash
 xraymind dashboard
 xraymind dashboard --attention --limit 20
+```
+
+Export the review dataset:
+
+```bash
+python scripts/export_cases.py \
+  --db outputs/xraymind_cases.sqlite3 \
+  --out-dir outputs/exports
+```
+
+Create a monitoring snapshot:
+
+```bash
+python scripts/monitor_cases.py \
+  --db outputs/xraymind_cases.sqlite3 \
+  --out outputs/monitoring/snapshot.json
+```
+
+Compare against a previous snapshot for simple drift alerts:
+
+```bash
+python scripts/monitor_cases.py \
+  --db outputs/xraymind_cases.sqlite3 \
+  --baseline outputs/monitoring/baseline.json \
+  --out outputs/monitoring/current.json
 ```
 
 See `docs/V1_0_CASE_WORKFLOW.md` for the complete local and FastAPI workflow.
@@ -368,10 +391,12 @@ xraymind/
   dicom.py            # DICOM ingestion, conversion, and redaction helpers
   ensemble.py         # multi-model ensemble prediction and uncertainty utilities
   evaluation.py       # reusable benchmark, dataset-card, and model-card helpers
+  export.py           # case workflow CSV/JSONL export utilities
   explainability.py   # Captum attribution utilities
   inference.py        # structured prediction output
   metrics.py          # reliability metrics and threshold tuning
   model_loader.py     # cached TorchXRayVision model loading
+  monitoring.py       # workflow monitoring and drift snapshots
   packet.py           # complete study-packet generation
   pdf.py              # optional HTML-to-PDF export
   plots.py            # reliability diagrams
@@ -389,7 +414,9 @@ scripts/
   dicom_to_png.py           # DICOM conversion/redaction wrapper
   ensemble_predict.py       # multi-model ensemble uncertainty runner
   evaluate_folder.py        # labeled-folder benchmarking with reliability metrics
+  export_cases.py           # case workflow CSV/JSONL export runner
   make_model_card.py        # markdown model-card generator
+  monitor_cases.py          # case workflow monitoring snapshot runner
   predict_image.py          # simple prediction script wrapper
   selective_prediction.py   # selective prediction / abstention artifact generator
   tta_predict.py            # single-image TTA uncertainty wrapper
@@ -420,21 +447,13 @@ docs/
 - TTA standard deviation and ensemble disagreement are rough uncertainty proxies, not calibrated clinical confidence estimates.
 - Selective prediction can now use either probability-margin confidence or ensemble uncertainty, but deferral only improves safety if deferred cases receive qualified review.
 - Conformal coverage depends on exchangeability between calibration and evaluation data, so distribution shift can break the coverage guarantee.
-- The v1.0 case workflow is a local research prototype, not an EHR/RIS/PACS integration.
+- The case workflow, export, and monitoring layers are local research prototypes, not EHR/RIS/PACS integrations.
 - DICOM redaction is a convenience helper, not a complete HIPAA de-identification pipeline.
 - The hosted API is suitable for demos and internal research, not production clinical deployment.
 
 ---
 
 ## Concrete roadmap
-
-### v1.1: case workflow UI and monitoring
-
-- Add a Gradio case queue tab for pending, deferred, flagged, and reviewed cases.
-- Export case-review datasets to CSV/JSONL for model improvement and error analysis.
-- Add reviewer agreement analytics and disagreement galleries.
-- Add drift monitoring over prediction distributions, alert volume, deferral rate, and label prevalence.
-- Add signed audit manifests for packet and case exports.
 
 ### v1.2: stronger validation and generalization
 
@@ -443,6 +462,14 @@ docs/
 - Add TTA-plus-ensemble hybrid uncertainty scoring.
 - Add uncertainty calibration plots and failure-case galleries.
 - Add optional Postgres backend if deploying beyond local demos.
+
+### v1.3: productization layer
+
+- Add authentication and tenant-aware case queues for hosted demos.
+- Add asynchronous background processing for uploaded images.
+- Add review assignment and second-reader workflow.
+- Add export redaction controls and audit-log signing.
+- Add basic PACS-style import/export mocks for demo environments.
 
 ---
 
