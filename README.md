@@ -1,10 +1,19 @@
 # XRayMind
 
-XRayMind is an explainable chest X-ray research prototype built around TorchXRayVision models, Captum attribution methods, reliability evaluation, reporting, DICOM ingestion, hosted API inference, uncertainty, model cards, dataset cards, selective prediction, ensemble disagreement, conformal prediction sets, local case review workflows, exportable review datasets, operational monitoring snapshots, assignment queues, second-reader review, and a lightweight Gradio interface. The project is intended for AI/ML research demos, model inspection, benchmarking, and educational exploration of chest radiography classifiers.
+XRayMind is an explainable chest X-ray research prototype built around TorchXRayVision models, Captum attribution methods, reliability evaluation, reporting, DICOM ingestion, hosted API inference, uncertainty, model cards, dataset cards, selective prediction, ensemble disagreement, conformal prediction sets, local case review workflows, exportable review datasets, operational monitoring snapshots, assignment queues, second-reader review, role-aware API access, reviewer queues, and a lightweight Gradio interface. The project is intended for AI/ML research demos, model inspection, benchmarking, and educational exploration of chest radiography classifiers.
 
 > **Important:** XRayMind is not a medical device and is not for clinical diagnosis, treatment, or triage. Outputs must be reviewed by qualified clinical professionals.
 
 ---
+
+## What is new in v1.3
+
+- Role-aware API-key authentication with `viewer`, `reviewer`, and `admin` roles.
+- Backward-compatible single-key API mode using `XRAYMIND_API_KEY`.
+- Stable Pydantic response schemas for health, identity, case list, case detail, case assignment, and reviewer queue responses.
+- Reviewer queue endpoints for claim/release workflows: `GET /reviewer/queue`, `POST /reviewer/claim`, and `POST /reviewer/release`.
+- Admin-only protection for exports and persisted monitoring snapshots.
+- API auth tests for role-key, legacy-key, dev-open, and invalid-key modes.
 
 ## What is new in v1.2
 
@@ -32,7 +41,6 @@ XRayMind is an explainable chest X-ray research prototype built around TorchXRay
 - Case queue records with image path, model, priority, status, tags, predictions, reviews, and timestamps.
 - Human review capture with decisions, reviewer notes, final labels, and audit events.
 - Dashboard summaries in `xraymind/dashboard.py` for status counts, priorities, low-confidence cases, review decisions, and top alert labels.
-- FastAPI workflow routes: `/cases`, `/cases/{case_id}`, `/cases/{case_id}/review`, `/dashboard/summary`, and `/dashboard/attention`.
 - CLI workflow commands: `xraymind case create/list/show/status/review` and `xraymind dashboard`.
 - Runnable local demo script: `scripts/case_workflow_demo.py`.
 - Dedicated workflow guide in `docs/V1_0_CASE_WORKFLOW.md`.
@@ -164,16 +172,38 @@ See `docs/V1_0_CASE_WORKFLOW.md` for the complete local and FastAPI workflow.
 
 ## Hosted API workflow
 
-Start the API:
+Start the API in local dev mode:
 
 ```bash
 uvicorn xraymind.api:app --reload
+```
+
+For a hosted demo, configure either a single legacy key:
+
+```bash
+export XRAYMIND_API_KEY="replace-with-a-long-random-token"
+```
+
+or role-aware keys:
+
+```bash
+export XRAYMIND_API_KEYS="ops=admin:admin-token,reader=reviewer:review-token,audit=viewer:view-token"
+```
+
+Roles are ordered as `viewer < reviewer < admin`. Viewers can read cases and dashboards, reviewers can create/review/claim cases, and admins can also export cases and save monitoring snapshots.
+
+Check auth and health:
+
+```bash
+curl http://localhost:8000/health
+curl -H "X-API-Key: review-token" http://localhost:8000/me
 ```
 
 Create a review case through the API:
 
 ```bash
 curl -X POST http://localhost:8000/cases \
+  -H "X-API-Key: review-token" \
   -F "file=@path/to/chest_xray.png" \
   -F "priority=elevated" \
   -F "assigned_to=reviewer_a" \
@@ -184,15 +214,32 @@ Assign a case:
 
 ```bash
 curl -X POST http://localhost:8000/cases/1/assign \
+  -H "X-API-Key: review-token" \
   -F "reviewer=reviewer_b" \
   -F "due_at=2026-05-01T17:00:00Z" \
   -F "needs_second_reader=true"
+```
+
+Use the reviewer queue:
+
+```bash
+curl -H "X-API-Key: review-token" "http://localhost:8000/reviewer/queue?reviewer=reviewer_b&limit=20"
+
+curl -X POST http://localhost:8000/reviewer/claim \
+  -H "X-API-Key: review-token" \
+  -F "case_id=1" \
+  -F "reviewer=reviewer_b"
+
+curl -X POST http://localhost:8000/reviewer/release \
+  -H "X-API-Key: review-token" \
+  -F "case_id=1"
 ```
 
 Add a review:
 
 ```bash
 curl -X POST http://localhost:8000/cases/1/review \
+  -H "X-API-Key: review-token" \
   -F "decision=uncertain" \
   -F "reviewer=reviewer_a" \
   -F "notes=Needs second read"
@@ -201,8 +248,21 @@ curl -X POST http://localhost:8000/cases/1/review \
 View dashboard:
 
 ```bash
-curl http://localhost:8000/dashboard/summary
-curl http://localhost:8000/dashboard/attention?limit=20
+curl -H "X-API-Key: view-token" http://localhost:8000/dashboard/summary
+curl -H "X-API-Key: view-token" "http://localhost:8000/dashboard/attention?limit=20"
+```
+
+Run admin-only exports and monitoring snapshot persistence:
+
+```bash
+curl -X POST http://localhost:8000/exports/cases \
+  -H "X-API-Key: admin-token" \
+  -F "out_dir=outputs/exports"
+
+curl -X POST http://localhost:8000/monitoring/snapshot \
+  -H "X-API-Key: admin-token" \
+  -F "out=outputs/monitoring/current.json" \
+  -F "markdown_out=outputs/monitoring/current.md"
 ```
 
 ---
@@ -247,6 +307,8 @@ python scripts/benchmark_models.py \
 ```text
 xraymind/
   api.py              # FastAPI hosted inference and case workflow service
+  api_auth.py         # API key auth and role dependencies
+  api_schemas.py      # Pydantic response schemas for hosted API routes
   audit.py            # JSONL audit logging helpers
   bootstrap.py        # bootstrap confidence intervals
   cases.py            # local case queue, prediction, assignment, and review helpers
@@ -286,7 +348,6 @@ scripts/
   predict_image.py          # simple prediction script wrapper
   selective_prediction.py   # selective prediction / abstention artifact generator
   tta_predict.py            # single-image TTA uncertainty wrapper
-  tune_thresholds.py        # per-label threshold tuning
 src/
   legacy Gradio and ensemble code from the original prototype
 app.py                   # modern Gradio demo
@@ -322,15 +383,15 @@ docs/
 
 ## Concrete roadmap
 
-### v1.3: hosted productization layer
+### v1.4: hosted persistence and job processing
 
-- Add authentication roles for admin, reviewer, and read-only auditor.
 - Add tenant-aware hosted queues and Postgres persistence.
 - Add asynchronous background processing for uploaded images.
-- Add export redaction controls and audit-log signing.
+- Add signed audit-log chains for tamper-evident demos.
+- Add export redaction controls.
 - Add basic PACS-style import/export mocks for demo environments.
 
-### v1.4: stronger validation and generalization
+### v1.5: stronger validation and generalization
 
 - Add subgroup-specific conformal and selective-risk curves.
 - Add calibration transfer experiments across NIH, CheXpert, MIMIC-CXR, and PadChest where licenses permit.
