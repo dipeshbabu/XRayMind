@@ -1,12 +1,23 @@
 # XRayMind
 
-XRayMind is an explainable chest X-ray research prototype built around TorchXRayVision models, Captum attribution methods, reliability evaluation, reporting, DICOM ingestion, hosted API inference, and a lightweight Gradio interface. The project is intended for AI/ML research demos, model inspection, benchmarking, and educational exploration of chest radiography classifiers.
+XRayMind is an explainable chest X-ray research prototype built around TorchXRayVision models, Captum attribution methods, reliability evaluation, reporting, DICOM ingestion, hosted API inference, uncertainty, model cards, dataset cards, and a lightweight Gradio interface. The project is intended for AI/ML research demos, model inspection, benchmarking, and educational exploration of chest radiography classifiers.
 
 > **Important:** XRayMind is not a medical device and is not for clinical diagnosis, treatment, or triage. Outputs must be reviewed by qualified clinical professionals.
 
 ---
 
-## What is new in v0.5
+## What is new in v0.6
+
+- Multi-model benchmark runner for folder/CSV chest X-ray datasets.
+- Reusable evaluation utilities in `xraymind/evaluation.py`.
+- Dataset-card generation for benchmark datasets.
+- Per-model benchmark model-card generation.
+- Combined leaderboard across TorchXRayVision models.
+- Optional subgroup evaluation for metadata slices such as sex, site, age group, or view position.
+- Test-time augmentation uncertainty helper and `xraymind tta` CLI command.
+- Dedicated research workflow guide in `docs/V0_6_RESEARCH_EVAL.md`.
+
+## What changed in v0.5
 
 - Optional DICOM ingestion for `.dcm` / `.dicom` inputs.
 - DICOM-to-PNG conversion script with safe metadata export.
@@ -96,6 +107,17 @@ xraymind predict \
   --image path/to/case.dcm \
   --out outputs/prediction.json
 ```
+
+### Run test-time augmentation uncertainty
+
+```bash
+xraymind tta \
+  --image path/to/chest_xray.png \
+  --model densenet121-res224-all \
+  --out outputs/tta_prediction.json
+```
+
+This returns mean and standard deviation across simple augmentations. Treat it as a research uncertainty signal, not a clinical confidence score.
 
 ### Convert or redact a DICOM file
 
@@ -193,9 +215,9 @@ See `docs/V0_4_REPORTING.md` for the full reporting workflow.
 Expected CSV format:
 
 ```csv
-image,Atelectasis,Cardiomegaly,Effusion
-000001.png,0,1,0
-000002.png,1,0,1
+image,Atelectasis,Cardiomegaly,Effusion,sex,view_position
+000001.png,0,1,0,F,PA
+000002.png,1,0,1,M,AP
 ```
 
 Run a basic evaluation:
@@ -207,7 +229,33 @@ python scripts/evaluate_folder.py \
   --out outputs/eval.csv
 ```
 
-Run a fuller reliability evaluation:
+Run a multi-model research benchmark:
+
+```bash
+python scripts/benchmark_models.py \
+  --image-dir data/images \
+  --labels data/labels.csv \
+  --models densenet121-res224-all densenet121-res224-nih densenet121-res224-chex \
+  --subgroups sex view_position \
+  --out-dir outputs/benchmark_v0_6 \
+  --save-plots
+```
+
+This produces:
+
+```text
+outputs/benchmark_v0_6/DATASET_CARD.md
+outputs/benchmark_v0_6/leaderboard.csv
+outputs/benchmark_v0_6/combined_metrics.csv
+outputs/benchmark_v0_6/combined_subgroup_metrics.csv
+outputs/benchmark_v0_6/run_manifest.json
+outputs/benchmark_v0_6/<model>/predictions.csv
+outputs/benchmark_v0_6/<model>/metrics.csv
+outputs/benchmark_v0_6/<model>/MODEL_CARD.md
+outputs/benchmark_v0_6/<model>/reliability_plots/*.png
+```
+
+Run a fuller reliability evaluation for one model:
 
 ```bash
 python scripts/evaluate_folder.py \
@@ -233,7 +281,7 @@ python scripts/tune_thresholds.py \
   --objective f1
 ```
 
-### Generate a model card
+### Generate a model card from existing metrics
 
 ```bash
 python scripts/make_model_card.py \
@@ -243,7 +291,7 @@ python scripts/make_model_card.py \
   --out outputs/MODEL_CARD.md
 ```
 
-See `docs/V0_3_RELIABILITY.md` for the full reliability workflow.
+See `docs/V0_3_RELIABILITY.md` and `docs/V0_6_RESEARCH_EVAL.md` for the full reliability and research evaluation workflows.
 
 ---
 
@@ -257,6 +305,7 @@ xraymind/
   cli.py              # command-line interface
   config.py           # shared constants and safety disclaimer
   dicom.py            # DICOM ingestion, conversion, and redaction helpers
+  evaluation.py       # reusable benchmark, dataset-card, and model-card helpers
   explainability.py   # Captum attribution utilities
   inference.py        # structured prediction output
   metrics.py          # reliability metrics and threshold tuning
@@ -266,13 +315,16 @@ xraymind/
   plots.py            # reliability diagrams
   preprocessing.py    # image loading and X-ray preprocessing
   report.py           # HTML report generation
+  tta.py              # test-time augmentation uncertainty utilities
   visualization.py    # original previews, overlays, and side-by-side panels
 scripts/
+  benchmark_models.py    # multi-model benchmark runner
   create_study_packet.py # full packet script wrapper
   dicom_to_png.py        # DICOM conversion/redaction wrapper
   evaluate_folder.py     # labeled-folder benchmarking with reliability metrics
   make_model_card.py     # markdown model-card generator
   predict_image.py       # simple prediction script wrapper
+  tta_predict.py         # single-image TTA uncertainty wrapper
   tune_thresholds.py     # per-label threshold tuning
 src/
   legacy Gradio and ensemble code from the original prototype
@@ -281,6 +333,7 @@ docs/
   api.md                 # hosted API, DICOM, Docker, and audit workflow
   V0_3_RELIABILITY.md    # reliability workflow
   V0_4_REPORTING.md      # reporting workflow
+  V0_6_RESEARCH_EVAL.md  # multi-model research evaluation workflow
 ```
 
 ---
@@ -291,6 +344,8 @@ docs/
 - Thresholds tuned on one dataset should not be reused on another dataset without validation.
 - Heatmaps and overlays show model sensitivity, not confirmed disease location.
 - Evaluation currently assumes image-level binary labels, not radiologist-validated localization masks.
+- Subgroup results can be unstable when group sizes are small or labels are imbalanced.
+- TTA standard deviation is a rough uncertainty proxy and not a calibrated clinical confidence estimate.
 - DICOM redaction is a convenience helper, not a complete HIPAA de-identification pipeline.
 - The hosted API is suitable for demos and internal research, not production clinical deployment.
 
@@ -298,20 +353,19 @@ docs/
 
 ## Concrete roadmap
 
-### v0.6: research-grade evaluation
-
-- Benchmark on NIH ChestX-ray14, CheXpert, MIMIC-CXR, and PadChest where licenses permit.
-- Compare multiple TorchXRayVision backbones and ensemble strategies.
-- Add subgroup evaluation for scanner/site/domain shift when metadata is available.
-- Add uncertainty methods such as test-time augmentation and ensemble variance.
-- Add dataset cards and model cards for each benchmark run.
-
 ### v0.7: clinical workflow prototype
 
 - Add case queue, reviewer notes, and human-in-the-loop feedback capture.
 - Add report comparison against radiology text labels where available.
 - Add monitoring dashboard for drift, calibration, and alert volume.
 - Add stronger deployment security boundaries and signed audit manifests.
+
+### v0.8: stronger ML layer
+
+- Add ensemble variance across multiple TorchXRayVision models.
+- Add selective prediction and abstention curves.
+- Add calibration transfer experiments across NIH, CheXpert, MIMIC-CXR, and PadChest where licenses permit.
+- Add lightweight fine-tuning adapters for research-only domain adaptation.
 
 ---
 
