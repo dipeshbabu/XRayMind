@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 DEFAULT_DB_PATH = "outputs/xraymind_cases.sqlite3"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def utc_now_iso() -> str:
@@ -40,7 +40,7 @@ def dict_factory(cursor: sqlite3.Cursor, row: sqlite3.Row) -> dict[str, Any]:
 
 
 class SQLiteStore:
-    """Small SQLite wrapper for cases, predictions, reviews, and audit events."""
+    """Small SQLite wrapper for cases, predictions, reviews, jobs, and audit events."""
 
     def __init__(self, path: str | Path = DEFAULT_DB_PATH):
         self.path = Path(path)
@@ -115,6 +115,21 @@ class SQLiteStore:
                     FOREIGN KEY(case_id) REFERENCES cases(id) ON DELETE CASCADE
                 );
 
+                CREATE TABLE IF NOT EXISTS hosted_jobs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tenant_id TEXT NOT NULL DEFAULT 'default',
+                    job_type TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'queued',
+                    payload TEXT NOT NULL,
+                    result TEXT,
+                    error TEXT,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    started_at TEXT,
+                    completed_at TEXT
+                );
+
                 CREATE TABLE IF NOT EXISTS audit_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     case_id INTEGER,
@@ -135,6 +150,8 @@ class SQLiteStore:
                 CREATE INDEX IF NOT EXISTS idx_predictions_case_id ON predictions(case_id);
                 CREATE INDEX IF NOT EXISTS idx_reviews_case_id ON reviews(case_id);
                 CREATE INDEX IF NOT EXISTS idx_audit_case_id ON audit_events(case_id);
+                CREATE INDEX IF NOT EXISTS idx_jobs_tenant_status ON hosted_jobs(tenant_id, status);
+                CREATE INDEX IF NOT EXISTS idx_jobs_status_created ON hosted_jobs(status, created_at);
                 """
             )
             conn.execute(
@@ -164,6 +181,25 @@ class SQLiteStore:
         }
         if "review_round" not in review_columns:
             conn.execute("ALTER TABLE reviews ADD COLUMN review_round INTEGER NOT NULL DEFAULT 1")
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS hosted_jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id TEXT NOT NULL DEFAULT 'default',
+                job_type TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'queued',
+                payload TEXT NOT NULL,
+                result TEXT,
+                error TEXT,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT
+            )
+            """
+        )
 
     def execute(self, query: str, params: tuple[Any, ...] = ()) -> int:
         """Execute a write query and return the last inserted row id."""
