@@ -1,10 +1,21 @@
 # XRayMind
 
-XRayMind is an explainable chest X-ray research prototype built around TorchXRayVision models, Captum attribution methods, reliability evaluation, reporting, DICOM ingestion, hosted API inference, uncertainty, model cards, dataset cards, selective prediction, ensemble disagreement, conformal prediction sets, local case review workflows, exportable review datasets, operational monitoring snapshots, and a lightweight Gradio interface. The project is intended for AI/ML research demos, model inspection, benchmarking, and educational exploration of chest radiography classifiers.
+XRayMind is an explainable chest X-ray research prototype built around TorchXRayVision models, Captum attribution methods, reliability evaluation, reporting, DICOM ingestion, hosted API inference, uncertainty, model cards, dataset cards, selective prediction, ensemble disagreement, conformal prediction sets, local case review workflows, exportable review datasets, operational monitoring snapshots, assignment queues, second-reader review, and a lightweight Gradio interface. The project is intended for AI/ML research demos, model inspection, benchmarking, and educational exploration of chest radiography classifiers.
 
 > **Important:** XRayMind is not a medical device and is not for clinical diagnosis, treatment, or triage. Outputs must be reviewed by qualified clinical professionals.
 
 ---
+
+## What is new in v1.2
+
+- Assignment fields for review cases: `assigned_to`, `due_at`, and `needs_second_reader`.
+- Idempotent SQLite schema migrations so existing local workflow databases are upgraded safely.
+- Second-reader logic: uncertain, disagree, defer, and flag first-round reviews automatically mark the case for another read.
+- New CLI command: `xraymind case assign`.
+- New API route: `POST /cases/{case_id}/assign`.
+- Case list filters for `assigned_to` and `needs_second_reader`.
+- Dashboard metrics for assignment load, unassigned cases, and second-reader cases.
+- Case exports now include assignment and second-reader columns.
 
 ## What is new in v1.1
 
@@ -25,36 +36,6 @@ XRayMind is an explainable chest X-ray research prototype built around TorchXRay
 - CLI workflow commands: `xraymind case create/list/show/status/review` and `xraymind dashboard`.
 - Runnable local demo script: `scripts/case_workflow_demo.py`.
 - Dedicated workflow guide in `docs/V1_0_CASE_WORKFLOW.md`.
-
-## What changed in v0.9
-
-- Split-conformal prediction-set utilities in `xraymind/conformal.py`.
-- Standalone conformal runner: `scripts/conformal_predict.py`.
-- Per-label conformal thresholds with target coverage control.
-- Prediction-set outputs for `negative`, `positive`, ambiguous, and empty sets.
-- Empirical coverage, mean set size, singleton rate, ambiguous rate, and empty rate summaries.
-- Markdown conformal reports for safer uncertainty communication.
-
-## What changed in v0.8
-
-- Multi-model ensemble prediction utilities in `xraymind/ensemble.py`.
-- Standalone ensemble runner: `scripts/ensemble_predict.py`.
-- Ensemble mean probabilities with per-label disagreement signals.
-- Uncertainty columns for standard deviation, range, entropy, and selected uncertainty score.
-- Ensemble-aware selective prediction using uncertainty-based deferral.
-- Per-member prediction CSVs, ensemble metrics, uncertainty summaries, Markdown reports, and run manifests.
-- Dedicated workflow guide in `docs/V0_8_ENSEMBLE_UNCERTAINTY.md`.
-
-## What changed in v0.7
-
-- Selective prediction / abstention utilities in `xraymind/selective.py`.
-- Standalone selective-risk script: `scripts/selective_prediction.py`.
-- Benchmark integration with `--selective`.
-- Per-label selective curves showing coverage, deferral rate, risk, accuracy, AUROC, Brier score, sensitivity, specificity, precision, and F1.
-- Aggregate selective-risk summaries across labels.
-- Automatic operating-point selection with `--max-risk` and `--min-coverage`.
-- Markdown selective prediction reports and risk-coverage plots.
-- Dedicated workflow guide in `docs/V0_7_SELECTIVE_PREDICTION.md`.
 
 ---
 
@@ -123,7 +104,17 @@ xraymind case create \
   --image path/to/chest_xray.png \
   --priority elevated \
   --tags demo,review \
+  --assigned-to reviewer_a \
   --db outputs/xraymind_cases.sqlite3
+```
+
+Assign or reassign a case:
+
+```bash
+xraymind case assign 1 \
+  --reviewer reviewer_b \
+  --due-at 2026-05-01T17:00:00Z \
+  --needs-second-reader
 ```
 
 Add a reviewer decision:
@@ -169,55 +160,6 @@ python scripts/monitor_cases.py \
 
 See `docs/V1_0_CASE_WORKFLOW.md` for the complete local and FastAPI workflow.
 
-### Run test-time augmentation uncertainty
-
-```bash
-xraymind tta \
-  --image path/to/chest_xray.png \
-  --model densenet121-res224-all \
-  --out outputs/tta_prediction.json
-```
-
-This returns mean and standard deviation across simple augmentations. Treat it as a research uncertainty signal, not a clinical confidence score.
-
-### Convert or redact a DICOM file
-
-```bash
-xraymind dicom \
-  --dicom path/to/case.dcm \
-  --png outputs/dicom/case.png \
-  --metadata outputs/dicom/case_metadata.json \
-  --redacted outputs/dicom/case_redacted.dcm
-```
-
-### Generate an explanation heatmap
-
-```bash
-xraymind explain \
-  --image path/to/chest_xray.png \
-  --label Cardiomegaly \
-  --out outputs/cardiomegaly_heatmap.png \
-  --method integrated_gradients
-```
-
-### Create a full study packet
-
-```bash
-xraymind packet \
-  --image path/to/chest_xray.png \
-  --out-dir outputs/study_packet \
-  --top-k 5
-```
-
-Optional PDF:
-
-```bash
-xraymind packet \
-  --image path/to/chest_xray.png \
-  --out-dir outputs/study_packet \
-  --pdf
-```
-
 ---
 
 ## Hosted API workflow
@@ -234,7 +176,17 @@ Create a review case through the API:
 curl -X POST http://localhost:8000/cases \
   -F "file=@path/to/chest_xray.png" \
   -F "priority=elevated" \
+  -F "assigned_to=reviewer_a" \
   -F "tags=demo,review"
+```
+
+Assign a case:
+
+```bash
+curl -X POST http://localhost:8000/cases/1/assign \
+  -F "reviewer=reviewer_b" \
+  -F "due_at=2026-05-01T17:00:00Z" \
+  -F "needs_second_reader=true"
 ```
 
 Add a review:
@@ -288,92 +240,6 @@ python scripts/benchmark_models.py \
   --max-risk 0.15
 ```
 
-### Run ensemble uncertainty evaluation
-
-```bash
-python scripts/ensemble_predict.py \
-  --image-dir data/images \
-  --labels data/labels.csv \
-  --models densenet121-res224-all densenet121-res224-nih densenet121-res224-chex \
-  --out-dir outputs/ensemble_v0_8 \
-  --dataset "XRayMind folder dataset" \
-  --selective \
-  --max-risk 0.15
-```
-
-This produces ensemble mean predictions, per-model prediction CSVs, uncertainty summaries, ensemble metrics, a Markdown ensemble report, and optional uncertainty-aware selective prediction artifacts.
-
-### Run conformal prediction sets from existing predictions
-
-```bash
-python scripts/conformal_predict.py \
-  --labels data/labels.csv \
-  --predictions outputs/ensemble_v0_8/ensemble_predictions.csv \
-  --out-dir outputs/conformal_v0_9 \
-  --alpha 0.1 \
-  --calibration-fraction 0.5 \
-  --dataset-name "XRayMind folder dataset"
-```
-
-This produces:
-
-```text
-outputs/conformal_v0_9/conformal_thresholds.csv
-outputs/conformal_v0_9/conformal_predictions.csv
-outputs/conformal_v0_9/conformal_summary.csv
-outputs/conformal_v0_9/CONFORMAL_REPORT.md
-```
-
-Use conformal sets as a calibration-backed uncertainty layer: singleton sets are more decisive, ambiguous sets should be reviewed, and coverage depends on the calibration split matching the evaluation distribution.
-
-### Run selective prediction from existing predictions
-
-```bash
-python scripts/selective_prediction.py \
-  --labels data/labels.csv \
-  --predictions outputs/benchmark_v0_7/densenet121-res224-all/predictions.csv \
-  --model densenet121-res224-all \
-  --dataset "XRayMind folder dataset" \
-  --out-dir outputs/selective_v0_7 \
-  --max-risk 0.15
-```
-
-For ensemble uncertainty outputs:
-
-```bash
-python scripts/selective_prediction.py \
-  --labels data/labels.csv \
-  --predictions outputs/ensemble_v0_8/ensemble_predictions.csv \
-  --model ensemble-xraymind \
-  --dataset "XRayMind folder dataset" \
-  --out-dir outputs/ensemble_selective_v0_8 \
-  --confidence-method ensemble_uncertainty \
-  --uncertainty-suffix _ensemble_uncertainty \
-  --max-risk 0.15
-```
-
-### Tune thresholds after inference
-
-```bash
-python scripts/tune_thresholds.py \
-  --labels data/labels.csv \
-  --predictions outputs/predictions.csv \
-  --out outputs/thresholds.csv \
-  --objective f1
-```
-
-### Generate a model card from existing metrics
-
-```bash
-python scripts/make_model_card.py \
-  --metrics outputs/eval.csv \
-  --model densenet121-res224-all \
-  --dataset "NIH ChestX-ray14 validation split" \
-  --out outputs/MODEL_CARD.md
-```
-
-See `docs/V0_3_RELIABILITY.md`, `docs/V0_6_RESEARCH_EVAL.md`, `docs/V0_7_SELECTIVE_PREDICTION.md`, `docs/V0_8_ENSEMBLE_UNCERTAINTY.md`, `docs/V0_9_CONFORMAL_PREDICTION.md`, and `docs/V1_0_CASE_WORKFLOW.md` for the full reliability, benchmark, abstention, ensemble uncertainty, conformal prediction, and case review workflows.
-
 ---
 
 ## Project structure
@@ -383,7 +249,7 @@ xraymind/
   api.py              # FastAPI hosted inference and case workflow service
   audit.py            # JSONL audit logging helpers
   bootstrap.py        # bootstrap confidence intervals
-  cases.py            # local case queue, prediction, and review helpers
+  cases.py            # local case queue, prediction, assignment, and review helpers
   cli.py              # command-line interface
   conformal.py        # conformal prediction-set utilities
   config.py           # shared constants and safety disclaimer
@@ -448,6 +314,7 @@ docs/
 - Selective prediction can now use either probability-margin confidence or ensemble uncertainty, but deferral only improves safety if deferred cases receive qualified review.
 - Conformal coverage depends on exchangeability between calibration and evaluation data, so distribution shift can break the coverage guarantee.
 - The case workflow, export, and monitoring layers are local research prototypes, not EHR/RIS/PACS integrations.
+- Assignment and second-reader logic are workflow helpers only; they are not clinical triage rules.
 - DICOM redaction is a convenience helper, not a complete HIPAA de-identification pipeline.
 - The hosted API is suitable for demos and internal research, not production clinical deployment.
 
@@ -455,21 +322,21 @@ docs/
 
 ## Concrete roadmap
 
-### v1.2: stronger validation and generalization
+### v1.3: hosted productization layer
+
+- Add authentication roles for admin, reviewer, and read-only auditor.
+- Add tenant-aware hosted queues and Postgres persistence.
+- Add asynchronous background processing for uploaded images.
+- Add export redaction controls and audit-log signing.
+- Add basic PACS-style import/export mocks for demo environments.
+
+### v1.4: stronger validation and generalization
 
 - Add subgroup-specific conformal and selective-risk curves.
 - Add calibration transfer experiments across NIH, CheXpert, MIMIC-CXR, and PadChest where licenses permit.
 - Add TTA-plus-ensemble hybrid uncertainty scoring.
 - Add uncertainty calibration plots and failure-case galleries.
-- Add optional Postgres backend if deploying beyond local demos.
-
-### v1.3: productization layer
-
-- Add authentication and tenant-aware case queues for hosted demos.
-- Add asynchronous background processing for uploaded images.
-- Add review assignment and second-reader workflow.
-- Add export redaction controls and audit-log signing.
-- Add basic PACS-style import/export mocks for demo environments.
+- Add dataset shift monitoring reports.
 
 ---
 
