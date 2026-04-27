@@ -9,13 +9,22 @@ import sys
 from pathlib import Path
 
 from .audit import audit_prediction
+from .cases import (
+    add_review,
+    create_case_with_prediction,
+    get_case_detail,
+    list_cases,
+    update_case_status,
+)
 from .config import DEFAULT_MODEL_NAME, DEFAULT_TOP_K
+from .dashboard import cases_requiring_attention, dashboard_summary
 from .dicom import dicom_to_png, redact_dicom, write_safe_metadata_json
 from .explainability import explain_to_file
 from .inference import predict_image, save_prediction
 from .packet import create_study_packet
 from .pdf import maybe_html_to_pdf
 from .report import save_html_report
+from .store import DEFAULT_DB_PATH
 from .tta import predict_with_tta
 from .visualization import save_original_preview
 
@@ -26,6 +35,10 @@ def _add_common_model_args(parser: argparse.ArgumentParser) -> None:
 
 def _add_audit_arg(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--audit-log", default=None, help="Optional JSONL audit log path")
+
+
+def _print_json(payload: dict | list) -> None:
+    print(json.dumps(payload, indent=2, sort_keys=True, default=str))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -102,6 +115,49 @@ def build_parser() -> argparse.ArgumentParser:
     dicom.add_argument("--png", default="outputs/dicom/preview.png", help="Output PNG path")
     dicom.add_argument("--metadata", default=None, help="Optional safe metadata JSON path")
     dicom.add_argument("--redacted", default=None, help="Optional redacted DICOM output path")
+
+    case = subparsers.add_parser("case", help="Local human-in-the-loop case workflow")
+    case_subparsers = case.add_subparsers(dest="case_command", required=True)
+
+    case_create = case_subparsers.add_parser("create", help="Create a case and run prediction")
+    case_create.add_argument("--image", required=True, help="Path to chest X-ray image")
+    case_create.add_argument("--db", default=DEFAULT_DB_PATH, help="SQLite workflow database path")
+    case_create.add_argument("--image-id", default=None)
+    case_create.add_argument("--priority", default="routine", choices=["routine", "elevated", "urgent"])
+    case_create.add_argument("--tags", default="", help="Comma-separated tags")
+    case_create.add_argument("--top-k", type=int, default=DEFAULT_TOP_K)
+    case_create.add_argument("--threshold", type=float, default=0.5)
+    _add_common_model_args(case_create)
+
+    case_list = case_subparsers.add_parser("list", help="List cases")
+    case_list.add_argument("--db", default=DEFAULT_DB_PATH)
+    case_list.add_argument("--status", default=None)
+    case_list.add_argument("--priority", default=None)
+    case_list.add_argument("--limit", type=int, default=25)
+    case_list.add_argument("--offset", type=int, default=0)
+
+    case_show = case_subparsers.add_parser("show", help="Show case detail")
+    case_show.add_argument("case_id", type=int)
+    case_show.add_argument("--db", default=DEFAULT_DB_PATH)
+
+    case_status = case_subparsers.add_parser("status", help="Update case status")
+    case_status.add_argument("case_id", type=int)
+    case_status.add_argument("status", choices=["pending", "reviewed", "deferred", "flagged", "archived"])
+    case_status.add_argument("--db", default=DEFAULT_DB_PATH)
+
+    case_review = case_subparsers.add_parser("review", help="Add a human review")
+    case_review.add_argument("case_id", type=int)
+    case_review.add_argument("--decision", required=True, choices=["agree", "disagree", "uncertain", "defer", "flag"])
+    case_review.add_argument("--reviewer", default=None)
+    case_review.add_argument("--notes", default=None)
+    case_review.add_argument("--final-labels-json", default="{}", help="JSON object with final labels")
+    case_review.add_argument("--next-status", default=None)
+    case_review.add_argument("--db", default=DEFAULT_DB_PATH)
+
+    dashboard = subparsers.add_parser("dashboard", help="Show local case workflow dashboard")
+    dashboard.add_argument("--db", default=DEFAULT_DB_PATH)
+    dashboard.add_argument("--attention", action="store_true", help="Show cases requiring attention instead of summary")
+    dashboard.add_argument("--limit", type=int, default=25)
 
     subparsers.add_parser("demo", help="Launch the Gradio demo")
     return parser
@@ -205,6 +261,61 @@ def main(argv: list[str] | None = None) -> int:
         if args.redacted:
             redacted_path = redact_dicom(args.dicom, args.redacted)
             print(f"Saved redacted DICOM copy to {redacted_path}")
+        return 0
+
+    if args.command == "case":
+        if args.case_command == "create":
+            tag_list = [tag.strip() for tag in args.tags.split(",") if tag.strip()]
+            result = create_case_with_prediction(
+                args.image,
+                image_id=args.image_id,
+                model_name=args.model,
+                top_k=args.top_k,
+                threshold=args.threshold,
+                priority=args.priority,
+                tags=tag_list,
+                db_path=args.db,
+            )
+            _print_json(result)
+            return 0
+        if args.case_command == "list":
+            _print_json(
+                {
+                    "cases": list_cases(
+                        status=args.status,
+                        priority=args.priority,
+                        limit=args.limit,
+                        offset=args.offset,
+                        db_path=args.db,
+                    )
+                }
+            )
+            return 0
+        if args.case_command == "show":
+            _print_json(get_case_detail(args.case_id, db_path=args.db))
+            return 0
+        if args.case_command == "status":
+            _print_json({"case": update_case_status(args.case_id, args.status, db_path=args.db)})
+            return 0
+        if args.case_command == "review":
+            final_labels = json.loads(args.final_labels_json or "{}")
+            review = add_review(
+                args.case_id,
+                decision=args.decision,
+                reviewer=args.reviewer,
+                notes=args.notes,
+                final_labels=final_labels,
+                next_status=args.next_status,
+                db_path=args.db,
+            )
+            _print_json({"review": review, "case_detail": get_case_detail(args.case_id, db_path=args.db)})
+            return 0
+
+    if args.command == "dashboard":
+        if args.attention:
+            _print_json({"cases": cases_requiring_attention(db_path=args.db, limit=args.limit)})
+        else:
+            _print_json(dashboard_summary(db_path=args.db))
         return 0
 
     if args.command == "demo":
