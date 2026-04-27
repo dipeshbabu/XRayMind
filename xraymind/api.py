@@ -16,6 +16,8 @@ from .api_schemas import (
     CaseDetailResponse,
     CaseEnvelope,
     CaseListResponse,
+    HostedJobEnvelope,
+    JobListResponse,
     PrincipalResponse,
     ReviewerQueueResponse,
     ServiceHealth,
@@ -32,6 +34,7 @@ from .cases import (
 from .config import DEFAULT_MODEL_NAME, DEFAULT_TOP_K, DISCLAIMER
 from .dashboard import cases_requiring_attention, dashboard_summary
 from .export import export_cases
+from .hosted_jobs import cancel_job, enqueue_case_prediction_job, get_job, list_jobs, process_next_job
 from .inference import predict_image
 from .monitoring import build_monitoring_markdown, build_monitoring_snapshot, save_monitoring_snapshot
 from .packet import create_study_packet
@@ -479,3 +482,101 @@ def save_monitoring_snapshot_endpoint(
         subgroup_min_cases=subgroup_min_cases,
     )
     return JSONResponse(snapshot)
+
+
+@app.post("/jobs/case-prediction", response_model=HostedJobEnvelope)
+def enqueue_case_prediction_job_endpoint(
+    file: UploadFile = File(...),
+    model: str = Form(DEFAULT_MODEL_NAME),
+    top_k: int = Form(DEFAULT_TOP_K),
+    threshold: float = Form(0.5),
+    image_id: Optional[str] = Form(default=None),
+    priority: str = Form("routine"),
+    tags: str = Form(""),
+    assigned_to: Optional[str] = Form(default=None),
+    due_at: Optional[str] = Form(default=None),
+    needs_second_reader: str = Form("false"),
+    tenant_id: Optional[str] = Form(default=None),
+    principal: ApiPrincipal = Depends(require_reviewer),
+) -> dict:
+    """Persist an uploaded image and enqueue async case prediction."""
+
+    image_path = _persist_upload(file, case_id_hint="job")
+    tag_list = [tag.strip() for tag in tags.split(",") if tag.strip()]
+    effective_tenant = tenant_id if principal.role == "admin" and tenant_id else principal.key_id
+    try:
+        job = enqueue_case_prediction_job(
+            image_path,
+            tenant_id=effective_tenant,
+            image_id=image_id,
+            source_filename=file.filename,
+            model_name=model,
+            top_k=top_k,
+            threshold=threshold,
+            priority=priority,
+            tags=tag_list,
+            assigned_to=assigned_to,
+            due_at=due_at,
+            needs_second_reader=_parse_boolish(needs_second_reader),
+            db_path=_db_path(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"job": job}
+
+
+@app.get("/jobs", response_model=JobListResponse)
+def list_jobs_endpoint(
+    tenant_id: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    principal: ApiPrincipal = Depends(require_api_key),
+) -> dict:
+    """List hosted async jobs. Non-admin callers only see their own tenant."""
+
+    effective_tenant = tenant_id if principal.role == "admin" else principal.key_id
+    try:
+        jobs = list_jobs(tenant_id=effective_tenant, status=status, limit=limit, offset=offset, db_path=_db_path())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"jobs": jobs, "count": len(jobs)}
+
+
+@app.get("/jobs/{job_id}", response_model=HostedJobEnvelope)
+def get_job_endpoint(job_id: int, principal: ApiPrincipal = Depends(require_api_key)) -> dict:
+    """Return one hosted job if the caller can access its tenant."""
+
+    job = get_job(job_id, db_path=_db_path())
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    if principal.role != "admin" and job.get("tenant_id") != principal.key_id:
+        raise HTTPException(status_code=403, detail="Cannot access another tenant's job")
+    return {"job": job}
+
+
+@app.post("/jobs/{job_id}/cancel", response_model=HostedJobEnvelope)
+def cancel_job_endpoint(job_id: int, principal: ApiPrincipal = Depends(require_reviewer)) -> dict:
+    """Cancel a queued hosted job."""
+
+    job = get_job(job_id, db_path=_db_path())
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    if principal.role != "admin" and job.get("tenant_id") != principal.key_id:
+        raise HTTPException(status_code=403, detail="Cannot cancel another tenant's job")
+    try:
+        cancelled = cancel_job(job_id, db_path=_db_path())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"job": cancelled}
+
+
+@app.post("/jobs/process-next", response_model=HostedJobEnvelope)
+def process_next_job_endpoint(_: ApiPrincipal = Depends(require_admin)) -> dict:
+    """Process the oldest queued hosted job synchronously.
+
+    Production deployments can call this from a worker process or scheduler. The
+    endpoint is intentionally admin-only because it executes model inference.
+    """
+
+    return {"job": process_next_job(db_path=_db_path())}
