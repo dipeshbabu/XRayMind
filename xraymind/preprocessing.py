@@ -18,7 +18,8 @@ def load_image(image: ImageLike) -> np.ndarray:
     """Load an image as a numpy array.
 
     The function accepts a file path, PIL image, or numpy array. Color images are
-    allowed and are later converted to a single X-ray channel.
+    allowed and are later converted to a single X-ray channel. DICOM paths are
+    supported when the optional pydicom dependency is installed.
     """
 
     if isinstance(image, np.ndarray):
@@ -29,6 +30,12 @@ def load_image(image: ImageLike) -> np.ndarray:
     path = Path(image)
     if not path.exists():
         raise FileNotFoundError(f"Image not found: {path}")
+
+    if path.suffix.lower() in {".dcm", ".dicom"}:
+        from .dicom import dicom_to_array
+
+        return dicom_to_array(path)
+
     return np.asarray(Image.open(path).convert("RGB"))
 
 
