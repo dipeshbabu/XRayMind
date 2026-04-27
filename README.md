@@ -1,12 +1,21 @@
 # XRayMind
 
-XRayMind is an explainable chest X-ray research prototype built around TorchXRayVision models, Captum attribution methods, reliability evaluation, reporting, DICOM ingestion, hosted API inference, uncertainty, model cards, dataset cards, selective prediction, ensemble disagreement, and a lightweight Gradio interface. The project is intended for AI/ML research demos, model inspection, benchmarking, and educational exploration of chest radiography classifiers.
+XRayMind is an explainable chest X-ray research prototype built around TorchXRayVision models, Captum attribution methods, reliability evaluation, reporting, DICOM ingestion, hosted API inference, uncertainty, model cards, dataset cards, selective prediction, ensemble disagreement, conformal prediction sets, and a lightweight Gradio interface. The project is intended for AI/ML research demos, model inspection, benchmarking, and educational exploration of chest radiography classifiers.
 
 > **Important:** XRayMind is not a medical device and is not for clinical diagnosis, treatment, or triage. Outputs must be reviewed by qualified clinical professionals.
 
 ---
 
-## What is new in v0.8
+## What is new in v0.9
+
+- Split-conformal prediction-set utilities in `xraymind/conformal.py`.
+- Standalone conformal runner: `scripts/conformal_predict.py`.
+- Per-label conformal thresholds with target coverage control.
+- Prediction-set outputs for `negative`, `positive`, ambiguous, and empty sets.
+- Empirical coverage, mean set size, singleton rate, ambiguous rate, and empty rate summaries.
+- Markdown conformal reports for safer uncertainty communication.
+
+## What changed in v0.8
 
 - Multi-model ensemble prediction utilities in `xraymind/ensemble.py`.
 - Standalone ensemble runner: `scripts/ensemble_predict.py`.
@@ -37,37 +46,6 @@ XRayMind is an explainable chest X-ray research prototype built around TorchXRay
 - Optional subgroup evaluation for metadata slices such as sex, site, age group, or view position.
 - Test-time augmentation uncertainty helper and `xraymind tta` CLI command.
 - Dedicated research workflow guide in `docs/V0_6_RESEARCH_EVAL.md`.
-
-## What changed in v0.5
-
-- Optional DICOM ingestion for `.dcm` / `.dicom` inputs.
-- DICOM-to-PNG conversion script with safe metadata export.
-- Research helper for redacting common direct-identifying DICOM fields.
-- FastAPI service for single-image prediction, batch prediction, and downloadable study-packet ZIPs.
-- Optional API-key protection for hosted demos via `XRAYMIND_API_KEY`.
-- JSONL audit logging for CLI and API workflows without storing raw image data.
-- Dockerfile and Docker Compose setup for local hosted deployment.
-- Dedicated API documentation in `docs/api.md`.
-
-## What changed in v0.4
-
-- Study-packet generation for single-image research/demo workflows.
-- Standardized original image preview.
-- Heatmap overlay on the original X-ray.
-- Side-by-side original image and explanation overview.
-- Richer HTML report with metadata, finding-level score bands, caveats, and recommended validation checks.
-- Optional PDF export through the `pdf` extra.
-- Updated Gradio app with downloadable HTML report and ZIP packet.
-- Dedicated reporting workflow documentation in `docs/V0_4_REPORTING.md`.
-
-## What changed in v0.3
-
-- Reliability metrics: Brier score, expected calibration error, sensitivity, specificity, precision, and F1.
-- Threshold tuning per pathology with F1 or Youden objective.
-- Bootstrap confidence intervals for AUROC and AUPRC.
-- Reliability diagram generation per label.
-- Model-card generator for evaluation summaries.
-- Dedicated reliability workflow documentation in `docs/V0_3_RELIABILITY.md`.
 
 ---
 
@@ -169,19 +147,6 @@ xraymind packet \
   --top-k 5
 ```
 
-This creates:
-
-```text
-outputs/study_packet/prediction.json
-outputs/study_packet/original_preview.png
-outputs/study_packet/heatmap.png
-outputs/study_packet/overlay.png
-outputs/study_packet/side_by_side.png
-outputs/study_packet/report.html
-outputs/study_packet/manifest.json
-outputs/study_packet.zip
-```
-
 Optional PDF:
 
 ```bash
@@ -190,44 +155,6 @@ xraymind packet \
   --out-dir outputs/study_packet \
   --pdf
 ```
-
-### Run the hosted API
-
-```bash
-uvicorn xraymind.api:app --reload --host 0.0.0.0 --port 8000
-```
-
-Optional API key:
-
-```bash
-export XRAYMIND_API_KEY=change-me
-curl -X POST http://localhost:8000/predict \
-  -H "X-API-Key: change-me" \
-  -F "file=@path/to/chest_xray.png"
-```
-
-Docker:
-
-```bash
-XRAYMIND_API_KEY=change-me docker compose up --build
-```
-
-See `docs/api.md` for the full API workflow.
-
-### Create a JSON + HTML report
-
-```bash
-xraymind report \
-  --image path/to/chest_xray.png \
-  --json outputs/prediction.json \
-  --html outputs/report.html \
-  --heatmap outputs/heatmap.png \
-  --original outputs/original_preview.png
-```
-
-If `--label` is not provided, the report command explains the highest-scoring predicted label.
-
-See `docs/V0_4_REPORTING.md` for the full reporting workflow.
 
 ---
 
@@ -264,26 +191,6 @@ python scripts/benchmark_models.py \
   --max-risk 0.15
 ```
 
-This produces:
-
-```text
-outputs/benchmark_v0_7/DATASET_CARD.md
-outputs/benchmark_v0_7/leaderboard.csv
-outputs/benchmark_v0_7/combined_metrics.csv
-outputs/benchmark_v0_7/combined_subgroup_metrics.csv
-outputs/benchmark_v0_7/combined_selective_summary.csv
-outputs/benchmark_v0_7/run_manifest.json
-outputs/benchmark_v0_7/<model>/predictions.csv
-outputs/benchmark_v0_7/<model>/metrics.csv
-outputs/benchmark_v0_7/<model>/MODEL_CARD.md
-outputs/benchmark_v0_7/<model>/reliability_plots/*.png
-outputs/benchmark_v0_7/<model>/selective_prediction/selective_curves.csv
-outputs/benchmark_v0_7/<model>/selective_prediction/selective_summary.csv
-outputs/benchmark_v0_7/<model>/selective_prediction/operating_point.json
-outputs/benchmark_v0_7/<model>/selective_prediction/selective_risk_curve.png
-outputs/benchmark_v0_7/<model>/selective_prediction/SELECTIVE_PREDICTION_REPORT.md
-```
-
 ### Run ensemble uncertainty evaluation
 
 ```bash
@@ -299,21 +206,28 @@ python scripts/ensemble_predict.py \
 
 This produces ensemble mean predictions, per-model prediction CSVs, uncertainty summaries, ensemble metrics, a Markdown ensemble report, and optional uncertainty-aware selective prediction artifacts.
 
-Run a fuller reliability evaluation for one model:
+### Run conformal prediction sets from existing predictions
 
 ```bash
-python scripts/evaluate_folder.py \
-  --image-dir data/images \
+python scripts/conformal_predict.py \
   --labels data/labels.csv \
-  --out outputs/eval.csv \
-  --predictions-out outputs/predictions.csv \
-  --tune-thresholds \
-  --threshold-objective f1 \
-  --bootstrap 1000 \
-  --save-plots
+  --predictions outputs/ensemble_v0_8/ensemble_predictions.csv \
+  --out-dir outputs/conformal_v0_9 \
+  --alpha 0.1 \
+  --calibration-fraction 0.5 \
+  --dataset-name "XRayMind folder dataset"
 ```
 
-This produces per-label AUROC, AUPRC, Brier score, ECE, sensitivity, specificity, precision, F1, optional confidence intervals, and optional reliability plots.
+This produces:
+
+```text
+outputs/conformal_v0_9/conformal_thresholds.csv
+outputs/conformal_v0_9/conformal_predictions.csv
+outputs/conformal_v0_9/conformal_summary.csv
+outputs/conformal_v0_9/CONFORMAL_REPORT.md
+```
+
+Use conformal sets as a calibration-backed uncertainty layer: singleton sets are more decisive, ambiguous sets should be reviewed, and coverage depends on the calibration split matching the evaluation distribution.
 
 ### Run selective prediction from existing predictions
 
@@ -341,8 +255,6 @@ python scripts/selective_prediction.py \
   --max-risk 0.15
 ```
 
-This produces selective curves, an aggregate risk-coverage summary, an operating-point JSON file, a PNG plot, and a Markdown report.
-
 ### Tune thresholds after inference
 
 ```bash
@@ -363,7 +275,7 @@ python scripts/make_model_card.py \
   --out outputs/MODEL_CARD.md
 ```
 
-See `docs/V0_3_RELIABILITY.md`, `docs/V0_6_RESEARCH_EVAL.md`, `docs/V0_7_SELECTIVE_PREDICTION.md`, and `docs/V0_8_ENSEMBLE_UNCERTAINTY.md` for the full reliability, benchmark, abstention, and ensemble uncertainty workflows.
+See `docs/V0_3_RELIABILITY.md`, `docs/V0_6_RESEARCH_EVAL.md`, `docs/V0_7_SELECTIVE_PREDICTION.md`, `docs/V0_8_ENSEMBLE_UNCERTAINTY.md`, and `docs/V0_9_CONFORMAL_PREDICTION.md` for the full reliability, benchmark, abstention, ensemble uncertainty, and conformal prediction workflows.
 
 ---
 
@@ -375,6 +287,7 @@ xraymind/
   audit.py            # JSONL audit logging helpers
   bootstrap.py        # bootstrap confidence intervals
   cli.py              # command-line interface
+  conformal.py        # conformal prediction-set utilities
   config.py           # shared constants and safety disclaimer
   dicom.py            # DICOM ingestion, conversion, and redaction helpers
   ensemble.py         # multi-model ensemble prediction and uncertainty utilities
@@ -393,6 +306,7 @@ xraymind/
   visualization.py    # original previews, overlays, and side-by-side panels
 scripts/
   benchmark_models.py       # multi-model benchmark runner
+  conformal_predict.py      # conformal prediction-set runner
   create_study_packet.py    # full packet script wrapper
   dicom_to_png.py           # DICOM conversion/redaction wrapper
   ensemble_predict.py       # multi-model ensemble uncertainty runner
@@ -412,6 +326,7 @@ docs/
   V0_6_RESEARCH_EVAL.md          # multi-model research evaluation workflow
   V0_7_SELECTIVE_PREDICTION.md   # selective prediction and abstention workflow
   V0_8_ENSEMBLE_UNCERTAINTY.md   # ensemble uncertainty workflow
+  V0_9_CONFORMAL_PREDICTION.md   # conformal prediction-set workflow
 ```
 
 ---
@@ -425,6 +340,7 @@ docs/
 - Subgroup results can be unstable when group sizes are small or labels are imbalanced.
 - TTA standard deviation and ensemble disagreement are rough uncertainty proxies, not calibrated clinical confidence estimates.
 - Selective prediction can now use either probability-margin confidence or ensemble uncertainty, but deferral only improves safety if deferred cases receive qualified review.
+- Conformal coverage depends on exchangeability between calibration and evaluation data, so distribution shift can break the coverage guarantee.
 - DICOM redaction is a convenience helper, not a complete HIPAA de-identification pipeline.
 - The hosted API is suitable for demos and internal research, not production clinical deployment.
 
@@ -432,20 +348,19 @@ docs/
 
 ## Concrete roadmap
 
-### v0.9: stronger uncertainty validation layer
-
-- Add conformal prediction sets for label-level uncertainty.
-- Add subgroup-specific selective-risk curves.
-- Add calibration transfer experiments across NIH, CheXpert, MIMIC-CXR, and PadChest where licenses permit.
-- Add TTA-plus-ensemble hybrid uncertainty scoring.
-- Add uncertainty calibration plots and failure-case galleries.
-
 ### v1.0: clinical workflow prototype
 
 - Add case queue, reviewer notes, and human-in-the-loop feedback capture.
 - Add report comparison against radiology text labels where available.
 - Add monitoring dashboard for drift, calibration, deferral rate, and alert volume.
 - Add stronger deployment security boundaries and signed audit manifests.
+
+### v1.1: stronger validation and generalization
+
+- Add subgroup-specific conformal and selective-risk curves.
+- Add calibration transfer experiments across NIH, CheXpert, MIMIC-CXR, and PadChest where licenses permit.
+- Add TTA-plus-ensemble hybrid uncertainty scoring.
+- Add uncertainty calibration plots and failure-case galleries.
 
 ---
 
