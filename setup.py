@@ -2,8 +2,8 @@ from setuptools import find_packages, setup
 
 setup(
     name="xraymind",
-    version="0.4.0",
-    description="Explainable chest X-ray inference, reporting, reliability evaluation, and study-packet generation for research demos.",
+    version="0.5.0",
+    description="Explainable chest X-ray inference, DICOM ingestion, reporting, API deployment, and reliability evaluation for research demos.",
     packages=find_packages(),
     install_requires=[
         "torch>=1.12",
@@ -11,6 +11,10 @@ setup(
         "torchxrayvision>=0.0.38",
         "captum>=0.5.0",
         "gradio>=4.0",
+        "fastapi>=0.110",
+        "uvicorn[standard]>=0.27",
+        "python-multipart>=0.0.9",
+        "pydicom>=2.4",
         "matplotlib>=3.2",
         "scikit-image>=0.16",
         "scikit-learn>=1.0",
