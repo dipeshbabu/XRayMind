@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 import pandas as pd
 from sklearn.metrics import average_precision_score, roc_auc_score
@@ -194,6 +194,67 @@ def write_dataset_card(
                 for value, count in counts.items():
                     lines.append(f"- `{value}`: {int(count)}")
     lines.extend(["", "## Responsible-use note", DISCLAIMER, ""])
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("\n".join(lines), encoding="utf-8")
+    return out
+
+
+def write_benchmark_model_card(
+    metrics_df: pd.DataFrame,
+    output_path: str | Path,
+    model_name: str,
+    dataset_name: str,
+    subgroup_metrics_path: str | Path | None = None,
+) -> Path:
+    """Write a model card summary for one benchmark run."""
+
+    lines = [
+        f"# Model Card: {model_name}",
+        "",
+        f"Generated: {datetime.now(timezone.utc).isoformat()}",
+        "",
+        "## Model",
+        f"- Model name: `{model_name}`",
+        "- Source: TorchXRayVision pretrained model registry",
+        "",
+        "## Evaluation dataset",
+        f"- Dataset: {dataset_name}",
+        f"- Labels evaluated: {len(metrics_df) if metrics_df is not None else 0}",
+        "",
+        "## Aggregate metrics",
+    ]
+    if metrics_df is not None and not metrics_df.empty:
+        aggregate_cols = ["auroc", "auprc", "brier", "ece", "sensitivity", "specificity", "precision", "f1"]
+        for col in aggregate_cols:
+            if col in metrics_df.columns:
+                lines.append(f"- Mean {col}: {float(metrics_df[col].dropna().mean()):.4f}")
+        lines.extend(["", "## Per-label metrics", "", "| Label | AUROC | AUPRC | Brier | ECE | F1 |", "|---|---:|---:|---:|---:|---:|"])
+        for _, row in metrics_df.iterrows():
+            lines.append(
+                f"| {row.get('label')} | {row.get('auroc', float('nan')):.4f} | {row.get('auprc', float('nan')):.4f} | {row.get('brier', float('nan')):.4f} | {row.get('ece', float('nan')):.4f} | {row.get('f1', float('nan')):.4f} |"
+            )
+    else:
+        lines.append("No valid per-label metrics were produced. Check label names and class balance.")
+    if subgroup_metrics_path:
+        lines.extend(["", "## Subgroup evaluation", f"Subgroup metrics were written to `{subgroup_metrics_path}`."])
+    lines.extend(
+        [
+            "",
+            "## Intended use",
+            "Research benchmarking, educational demos, reliability analysis, and model comparison. Not for clinical deployment.",
+            "",
+            "## Limitations",
+            "- Scores depend on the dataset, preprocessing, label definitions, and domain shift.",
+            "- Calibration and thresholds must be validated on the target setting.",
+            "- Heatmaps are sensitivity visualizations, not confirmed lesion localization.",
+            "- This card does not establish regulatory, clinical, or safety validation.",
+            "",
+            "## Responsible-use note",
+            DISCLAIMER,
+            "",
+        ]
+    )
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(lines), encoding="utf-8")
