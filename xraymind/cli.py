@@ -11,6 +11,7 @@ from pathlib import Path
 from .audit import audit_prediction
 from .cases import (
     add_review,
+    assign_case,
     create_case_with_prediction,
     get_case_detail,
     list_cases,
@@ -127,6 +128,9 @@ def build_parser() -> argparse.ArgumentParser:
     case_create.add_argument("--image-id", default=None)
     case_create.add_argument("--priority", default="routine", choices=["routine", "elevated", "urgent"])
     case_create.add_argument("--tags", default="", help="Comma-separated tags")
+    case_create.add_argument("--assigned-to", default=None, help="Initial reader/reviewer assignment")
+    case_create.add_argument("--due-at", default=None, help="Optional ISO-8601 review due timestamp")
+    case_create.add_argument("--needs-second-reader", action="store_true", help="Mark case for double read")
     case_create.add_argument("--top-k", type=int, default=DEFAULT_TOP_K)
     case_create.add_argument("--threshold", type=float, default=0.5)
     _add_common_model_args(case_create)
@@ -135,6 +139,8 @@ def build_parser() -> argparse.ArgumentParser:
     case_list.add_argument("--db", default=DEFAULT_DB_PATH)
     case_list.add_argument("--status", default=None)
     case_list.add_argument("--priority", default=None)
+    case_list.add_argument("--assigned-to", default=None)
+    case_list.add_argument("--needs-second-reader", action="store_true")
     case_list.add_argument("--limit", type=int, default=25)
     case_list.add_argument("--offset", type=int, default=0)
 
@@ -147,6 +153,14 @@ def build_parser() -> argparse.ArgumentParser:
     case_status.add_argument("status", choices=["pending", "reviewed", "deferred", "flagged", "archived"])
     case_status.add_argument("--db", default=DEFAULT_DB_PATH)
 
+    case_assign = case_subparsers.add_parser("assign", help="Assign or reassign a case")
+    case_assign.add_argument("case_id", type=int)
+    case_assign.add_argument("--reviewer", default=None, help="Reader/reviewer username or email")
+    case_assign.add_argument("--due-at", default=None, help="Optional ISO-8601 review due timestamp")
+    case_assign.add_argument("--needs-second-reader", action="store_true", help="Require a second reader")
+    case_assign.add_argument("--clear-second-reader", action="store_true", help="Clear second reader requirement")
+    case_assign.add_argument("--db", default=DEFAULT_DB_PATH)
+
     case_review = case_subparsers.add_parser("review", help="Add a human review")
     case_review.add_argument("case_id", type=int)
     case_review.add_argument("--decision", required=True, choices=["agree", "disagree", "uncertain", "defer", "flag"])
@@ -154,6 +168,7 @@ def build_parser() -> argparse.ArgumentParser:
     case_review.add_argument("--notes", default=None)
     case_review.add_argument("--final-labels-json", default="{}", help="JSON object with final labels")
     case_review.add_argument("--next-status", default=None)
+    case_review.add_argument("--review-round", type=int, default=None)
     case_review.add_argument("--db", default=DEFAULT_DB_PATH)
 
     dashboard = subparsers.add_parser("dashboard", help="Show local case workflow dashboard")
@@ -286,18 +301,52 @@ def main(argv: list[str] | None = None) -> int:
                 threshold=args.threshold,
                 priority=args.priority,
                 tags=tag_list,
+                assigned_to=args.assigned_to,
+                due_at=args.due_at,
+                needs_second_reader=args.needs_second_reader,
                 db_path=args.db,
             )
             _print_json(result)
             return 0
         if args.case_command == "list":
-            _print_json({"cases": list_cases(status=args.status, priority=args.priority, limit=args.limit, offset=args.offset, db_path=args.db)})
+            second_reader = True if args.needs_second_reader else None
+            _print_json(
+                {
+                    "cases": list_cases(
+                        status=args.status,
+                        priority=args.priority,
+                        assigned_to=args.assigned_to,
+                        needs_second_reader=second_reader,
+                        limit=args.limit,
+                        offset=args.offset,
+                        db_path=args.db,
+                    )
+                }
+            )
             return 0
         if args.case_command == "show":
             _print_json(get_case_detail(args.case_id, db_path=args.db))
             return 0
         if args.case_command == "status":
             _print_json({"case": update_case_status(args.case_id, args.status, db_path=args.db)})
+            return 0
+        if args.case_command == "assign":
+            second_reader = None
+            if args.needs_second_reader:
+                second_reader = True
+            if args.clear_second_reader:
+                second_reader = False
+            _print_json(
+                {
+                    "case": assign_case(
+                        args.case_id,
+                        reviewer=args.reviewer,
+                        due_at=args.due_at,
+                        needs_second_reader=second_reader,
+                        db_path=args.db,
+                    )
+                }
+            )
             return 0
         if args.case_command == "review":
             final_labels = json.loads(args.final_labels_json or "{}")
@@ -308,6 +357,7 @@ def main(argv: list[str] | None = None) -> int:
                 notes=args.notes,
                 final_labels=final_labels,
                 next_status=args.next_status,
+                review_round=args.review_round,
                 db_path=args.db,
             )
             _print_json({"review": review, "case_detail": get_case_detail(args.case_id, db_path=args.db)})
