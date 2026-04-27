@@ -21,12 +21,14 @@ from .cases import (
 )
 from .config import DEFAULT_MODEL_NAME, DEFAULT_TOP_K, DISCLAIMER
 from .dashboard import cases_requiring_attention, dashboard_summary
+from .export import export_cases
 from .inference import predict_image
+from .monitoring import build_monitoring_snapshot, save_monitoring_snapshot
 from .packet import create_study_packet
 from .store import DEFAULT_DB_PATH, SQLiteStore
 
 API_TITLE = "XRayMind API"
-API_VERSION = "1.0.0"
+API_VERSION = "1.1.0"
 
 app = FastAPI(
     title=API_TITLE,
@@ -289,3 +291,58 @@ def dashboard_attention_endpoint(
 
     store = SQLiteStore(_db_path())
     return JSONResponse({"cases": cases_requiring_attention(store=store, limit=limit)})
+
+
+@app.post("/exports/cases")
+def export_cases_endpoint(
+    out_dir: str = Form("outputs/exports"),
+    status: Optional[str] = Form(default=None),
+    priority: Optional[str] = Form(default=None),
+    limit: int = Form(10_000),
+    offset: int = Form(0),
+    _: None = Depends(require_api_key),
+) -> JSONResponse:
+    """Export case workflow data to JSONL/CSV and return the manifest."""
+
+    try:
+        manifest = export_cases(
+            out_dir,
+            status=status,
+            priority=priority,
+            limit=limit,
+            offset=offset,
+            db_path=_db_path(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(manifest)
+
+
+@app.get("/monitoring/snapshot")
+def monitoring_snapshot_endpoint(
+    limit: int = 10_000,
+    _: None = Depends(require_api_key),
+) -> JSONResponse:
+    """Return an in-memory monitoring snapshot without writing files."""
+
+    return JSONResponse(build_monitoring_snapshot(db_path=_db_path(), limit=limit))
+
+
+@app.post("/monitoring/snapshot")
+def save_monitoring_snapshot_endpoint(
+    out: str = Form("outputs/monitoring/snapshot.json"),
+    baseline: Optional[str] = Form(default=None),
+    limit: int = Form(10_000),
+    drift_threshold: float = Form(0.15),
+    _: None = Depends(require_api_key),
+) -> JSONResponse:
+    """Persist a monitoring snapshot and optionally compare it with a baseline snapshot."""
+
+    snapshot = save_monitoring_snapshot(
+        out,
+        baseline=baseline,
+        db_path=_db_path(),
+        limit=limit,
+        drift_threshold=drift_threshold,
+    )
+    return JSONResponse(snapshot)
