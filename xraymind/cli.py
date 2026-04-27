@@ -10,7 +10,10 @@ from pathlib import Path
 from .config import DEFAULT_MODEL_NAME, DEFAULT_TOP_K
 from .explainability import explain_to_file
 from .inference import predict_image, save_prediction
+from .packet import create_study_packet
+from .pdf import maybe_html_to_pdf
 from .report import save_html_report
+from .visualization import save_original_preview
 
 
 def _add_common_model_args(parser: argparse.ArgumentParser) -> None:
@@ -47,15 +50,33 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--label", default=None, help="Optional target label for heatmap")
     report.add_argument("--json", default="outputs/prediction.json", help="Output JSON path")
     report.add_argument("--html", default="outputs/report.html", help="Output HTML path")
+    report.add_argument("--pdf", default=None, help="Optional PDF report path")
     report.add_argument("--heatmap", default="outputs/heatmap.png", help="Output heatmap path")
+    report.add_argument("--original", default="outputs/original_preview.png", help="Output original preview path")
     report.add_argument("--top-k", type=int, default=DEFAULT_TOP_K)
     report.add_argument("--threshold", type=float, default=0.5)
+    report.add_argument("--image-id", default=None)
     report.add_argument(
         "--method",
         default="integrated_gradients",
         choices=["saliency", "input_x_gradient", "integrated_gradients"],
     )
     _add_common_model_args(report)
+
+    packet = subparsers.add_parser("packet", help="Create a complete single-image study packet")
+    packet.add_argument("--image", required=True, help="Path to chest X-ray image")
+    packet.add_argument("--out-dir", default="outputs/study_packet")
+    packet.add_argument("--label", default=None, help="Optional target label for heatmap")
+    packet.add_argument("--top-k", type=int, default=DEFAULT_TOP_K)
+    packet.add_argument("--threshold", type=float, default=0.5)
+    packet.add_argument("--image-id", default=None)
+    packet.add_argument("--pdf", action="store_true", help="Also export report.pdf")
+    packet.add_argument(
+        "--method",
+        default="integrated_gradients",
+        choices=["saliency", "input_x_gradient", "integrated_gradients"],
+    )
+    _add_common_model_args(packet)
 
     subparsers.add_parser("demo", help="Launch the Gradio demo")
     return parser
@@ -90,6 +111,7 @@ def main(argv: list[str] | None = None) -> int:
             args.image, model_name=args.model, top_k=args.top_k, threshold=args.threshold
         )
         save_prediction(result, args.json)
+        original_path = save_original_preview(args.image, args.original)
         heatmap_path = None
         label = args.label or (result["top_findings"][0]["label"] if result["top_findings"] else None)
         if label:
@@ -100,9 +122,35 @@ def main(argv: list[str] | None = None) -> int:
                 model_name=args.model,
                 method=args.method,
             )
-        save_html_report(result, args.html, heatmap_path=heatmap_path)
+        save_html_report(
+            result,
+            args.html,
+            heatmap_path=heatmap_path,
+            original_path=original_path,
+            image_id=args.image_id,
+        )
+        maybe_html_to_pdf(args.html, args.pdf)
         print(f"Prediction saved to {args.json}")
         print(f"Report saved to {args.html}")
+        if args.pdf:
+            print(f"PDF saved to {args.pdf}")
+        return 0
+
+    if args.command == "packet":
+        manifest = create_study_packet(
+            image=args.image,
+            output_dir=args.out_dir,
+            model_name=args.model,
+            label=args.label,
+            top_k=args.top_k,
+            threshold=args.threshold,
+            method=args.method,
+            make_pdf=args.pdf,
+            image_id=args.image_id,
+        )
+        print(f"Study packet saved to {args.out_dir}")
+        print(f"Manifest: {manifest['files']['manifest']}")
+        print(f"ZIP: {manifest['files']['zip']}")
         return 0
 
     if args.command == "demo":
