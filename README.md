@@ -1,12 +1,22 @@
 # XRayMind
 
-XRayMind is an explainable chest X-ray research prototype built around TorchXRayVision models, Captum attribution methods, reliability evaluation, reporting, DICOM ingestion, hosted API inference, uncertainty, model cards, dataset cards, selective prediction, and a lightweight Gradio interface. The project is intended for AI/ML research demos, model inspection, benchmarking, and educational exploration of chest radiography classifiers.
+XRayMind is an explainable chest X-ray research prototype built around TorchXRayVision models, Captum attribution methods, reliability evaluation, reporting, DICOM ingestion, hosted API inference, uncertainty, model cards, dataset cards, selective prediction, ensemble disagreement, and a lightweight Gradio interface. The project is intended for AI/ML research demos, model inspection, benchmarking, and educational exploration of chest radiography classifiers.
 
 > **Important:** XRayMind is not a medical device and is not for clinical diagnosis, treatment, or triage. Outputs must be reviewed by qualified clinical professionals.
 
 ---
 
-## What is new in v0.7
+## What is new in v0.8
+
+- Multi-model ensemble prediction utilities in `xraymind/ensemble.py`.
+- Standalone ensemble runner: `scripts/ensemble_predict.py`.
+- Ensemble mean probabilities with per-label disagreement signals.
+- Uncertainty columns for standard deviation, range, entropy, and selected uncertainty score.
+- Ensemble-aware selective prediction using uncertainty-based deferral.
+- Per-member prediction CSVs, ensemble metrics, uncertainty summaries, Markdown reports, and run manifests.
+- Dedicated workflow guide in `docs/V0_8_ENSEMBLE_UNCERTAINTY.md`.
+
+## What changed in v0.7
 
 - Selective prediction / abstention utilities in `xraymind/selective.py`.
 - Standalone selective-risk script: `scripts/selective_prediction.py`.
@@ -274,6 +284,21 @@ outputs/benchmark_v0_7/<model>/selective_prediction/selective_risk_curve.png
 outputs/benchmark_v0_7/<model>/selective_prediction/SELECTIVE_PREDICTION_REPORT.md
 ```
 
+### Run ensemble uncertainty evaluation
+
+```bash
+python scripts/ensemble_predict.py \
+  --image-dir data/images \
+  --labels data/labels.csv \
+  --models densenet121-res224-all densenet121-res224-nih densenet121-res224-chex \
+  --out-dir outputs/ensemble_v0_8 \
+  --dataset "XRayMind folder dataset" \
+  --selective \
+  --max-risk 0.15
+```
+
+This produces ensemble mean predictions, per-model prediction CSVs, uncertainty summaries, ensemble metrics, a Markdown ensemble report, and optional uncertainty-aware selective prediction artifacts.
+
 Run a fuller reliability evaluation for one model:
 
 ```bash
@@ -302,6 +327,20 @@ python scripts/selective_prediction.py \
   --max-risk 0.15
 ```
 
+For ensemble uncertainty outputs:
+
+```bash
+python scripts/selective_prediction.py \
+  --labels data/labels.csv \
+  --predictions outputs/ensemble_v0_8/ensemble_predictions.csv \
+  --model ensemble-xraymind \
+  --dataset "XRayMind folder dataset" \
+  --out-dir outputs/ensemble_selective_v0_8 \
+  --confidence-method ensemble_uncertainty \
+  --uncertainty-suffix _ensemble_uncertainty \
+  --max-risk 0.15
+```
+
 This produces selective curves, an aggregate risk-coverage summary, an operating-point JSON file, a PNG plot, and a Markdown report.
 
 ### Tune thresholds after inference
@@ -324,7 +363,7 @@ python scripts/make_model_card.py \
   --out outputs/MODEL_CARD.md
 ```
 
-See `docs/V0_3_RELIABILITY.md`, `docs/V0_6_RESEARCH_EVAL.md`, and `docs/V0_7_SELECTIVE_PREDICTION.md` for the full reliability, benchmark, and abstention workflows.
+See `docs/V0_3_RELIABILITY.md`, `docs/V0_6_RESEARCH_EVAL.md`, `docs/V0_7_SELECTIVE_PREDICTION.md`, and `docs/V0_8_ENSEMBLE_UNCERTAINTY.md` for the full reliability, benchmark, abstention, and ensemble uncertainty workflows.
 
 ---
 
@@ -338,6 +377,7 @@ xraymind/
   cli.py              # command-line interface
   config.py           # shared constants and safety disclaimer
   dicom.py            # DICOM ingestion, conversion, and redaction helpers
+  ensemble.py         # multi-model ensemble prediction and uncertainty utilities
   evaluation.py       # reusable benchmark, dataset-card, and model-card helpers
   explainability.py   # Captum attribution utilities
   inference.py        # structured prediction output
@@ -355,6 +395,7 @@ scripts/
   benchmark_models.py       # multi-model benchmark runner
   create_study_packet.py    # full packet script wrapper
   dicom_to_png.py           # DICOM conversion/redaction wrapper
+  ensemble_predict.py       # multi-model ensemble uncertainty runner
   evaluate_folder.py        # labeled-folder benchmarking with reliability metrics
   make_model_card.py        # markdown model-card generator
   predict_image.py          # simple prediction script wrapper
@@ -370,6 +411,7 @@ docs/
   V0_4_REPORTING.md              # reporting workflow
   V0_6_RESEARCH_EVAL.md          # multi-model research evaluation workflow
   V0_7_SELECTIVE_PREDICTION.md   # selective prediction and abstention workflow
+  V0_8_ENSEMBLE_UNCERTAINTY.md   # ensemble uncertainty workflow
 ```
 
 ---
@@ -381,8 +423,8 @@ docs/
 - Heatmaps and overlays show model sensitivity, not confirmed disease location.
 - Evaluation currently assumes image-level binary labels, not radiologist-validated localization masks.
 - Subgroup results can be unstable when group sizes are small or labels are imbalanced.
-- TTA standard deviation is a rough uncertainty proxy and not a calibrated clinical confidence estimate.
-- Selective prediction currently uses distance from the 0.5 decision boundary as a simple confidence score.
+- TTA standard deviation and ensemble disagreement are rough uncertainty proxies, not calibrated clinical confidence estimates.
+- Selective prediction can now use either probability-margin confidence or ensemble uncertainty, but deferral only improves safety if deferred cases receive qualified review.
 - DICOM redaction is a convenience helper, not a complete HIPAA de-identification pipeline.
 - The hosted API is suitable for demos and internal research, not production clinical deployment.
 
@@ -390,15 +432,15 @@ docs/
 
 ## Concrete roadmap
 
-### v0.8: stronger ML uncertainty layer
+### v0.9: stronger uncertainty validation layer
 
-- Add ensemble variance across multiple TorchXRayVision models.
-- Add TTA standard deviation as a selectable abstention score.
 - Add conformal prediction sets for label-level uncertainty.
 - Add subgroup-specific selective-risk curves.
 - Add calibration transfer experiments across NIH, CheXpert, MIMIC-CXR, and PadChest where licenses permit.
+- Add TTA-plus-ensemble hybrid uncertainty scoring.
+- Add uncertainty calibration plots and failure-case galleries.
 
-### v0.9: clinical workflow prototype
+### v1.0: clinical workflow prototype
 
 - Add case queue, reviewer notes, and human-in-the-loop feedback capture.
 - Add report comparison against radiology text labels where available.
