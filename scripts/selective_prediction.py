@@ -8,6 +8,13 @@ python scripts/selective_prediction.py \
   --dataset "NIH validation split" \
   --out-dir outputs/selective_v0_7 \
   --max-risk 0.15
+
+For ensemble prediction CSVs produced by scripts/ensemble_predict.py, use:
+python scripts/selective_prediction.py \
+  --labels data/labels.csv \
+  --predictions outputs/ensemble_v0_8/ensemble_predictions.csv \
+  --confidence-method ensemble_uncertainty \
+  --uncertainty-suffix _ensemble_uncertainty
 """
 
 from __future__ import annotations
@@ -42,6 +49,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--min-coverage", type=float, default=None)
     parser.add_argument("--model", default="xraymind-model")
     parser.add_argument("--dataset", default="XRayMind evaluation dataset")
+    parser.add_argument(
+        "--confidence-method",
+        choices=["probability_margin", "prediction_confidence_column", "ensemble_uncertainty"],
+        default="probability_margin",
+        help="How to rank cases for abstention. Ensemble CSVs should use ensemble_uncertainty.",
+    )
+    parser.add_argument("--confidence-suffix", default="_confidence")
+    parser.add_argument("--uncertainty-suffix", default=None)
+    parser.add_argument("--uncertainty-weight", type=float, default=0.5)
     return parser.parse_args()
 
 
@@ -72,6 +88,10 @@ def main() -> int:
     pred_df = pd.read_csv(args.predictions)
     label_names = args.labels_to_evaluate or label_columns(labels_df, args.image_column, args.subgroups)
 
+    uncertainty_suffix = args.uncertainty_suffix
+    if args.confidence_method == "ensemble_uncertainty" and uncertainty_suffix is None:
+        uncertainty_suffix = "_ensemble_uncertainty"
+
     curves_df = evaluate_selective_predictions(
         labels_df=labels_df,
         pred_df=pred_df,
@@ -79,6 +99,9 @@ def main() -> int:
         labels=label_names,
         threshold=args.threshold,
         coverage_grid=args.coverage_grid,
+        confidence_suffix=args.confidence_suffix,
+        uncertainty_suffix=uncertainty_suffix,
+        uncertainty_weight=args.uncertainty_weight,
     )
     curves_path = out_dir / "selective_curves.csv"
     curves_df.to_csv(curves_path, index=False)
@@ -103,6 +126,7 @@ def main() -> int:
         dataset_name=args.dataset,
         model_name=args.model,
         plot_path=plot_path.name if plot_path else None,
+        confidence_method=args.confidence_method,
     )
 
     print(f"Saved selective curves to {curves_path}")
