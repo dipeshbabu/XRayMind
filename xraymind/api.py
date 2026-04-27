@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from .audit import audit_prediction
 from .cases import (
     add_review,
+    assign_case,
     create_case_with_prediction,
     get_case_detail,
     list_cases,
@@ -77,6 +78,14 @@ def _persist_upload(upload: UploadFile, case_id_hint: str | None = None) -> Path
     with out.open("wb") as handle:
         shutil.copyfileobj(upload.file, handle)
     return out
+
+
+def _parse_boolish(value: str | bool | None) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 @app.get("/health")
@@ -176,6 +185,9 @@ def create_case_endpoint(
     image_id: Optional[str] = Form(default=None),
     priority: str = Form("routine"),
     tags: str = Form(""),
+    assigned_to: Optional[str] = Form(default=None),
+    due_at: Optional[str] = Form(default=None),
+    needs_second_reader: str = Form("false"),
     _: None = Depends(require_api_key),
 ) -> JSONResponse:
     """Persist an uploaded image as a review case and run prediction."""
@@ -192,6 +204,9 @@ def create_case_endpoint(
             threshold=threshold,
             priority=priority,
             tags=tag_list,
+            assigned_to=assigned_to,
+            due_at=due_at,
+            needs_second_reader=_parse_boolish(needs_second_reader),
             db_path=_db_path(),
         )
     except ValueError as exc:
@@ -203,6 +218,8 @@ def create_case_endpoint(
 def list_cases_endpoint(
     status: Optional[str] = None,
     priority: Optional[str] = None,
+    assigned_to: Optional[str] = None,
+    needs_second_reader: Optional[bool] = None,
     limit: int = 50,
     offset: int = 0,
     _: None = Depends(require_api_key),
@@ -210,7 +227,15 @@ def list_cases_endpoint(
     """List persisted review cases."""
 
     try:
-        cases = list_cases(status=status, priority=priority, limit=limit, offset=offset, db_path=_db_path())
+        cases = list_cases(
+            status=status,
+            priority=priority,
+            assigned_to=assigned_to,
+            needs_second_reader=needs_second_reader,
+            limit=limit,
+            offset=offset,
+            db_path=_db_path(),
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return JSONResponse({"cases": cases, "count": len(cases)})
@@ -243,6 +268,29 @@ def update_case_status_endpoint(
     return JSONResponse({"case": case})
 
 
+@app.post("/cases/{case_id}/assign")
+def assign_case_endpoint(
+    case_id: int,
+    reviewer: Optional[str] = Form(default=None),
+    due_at: Optional[str] = Form(default=None),
+    needs_second_reader: Optional[bool] = Form(default=None),
+    _: None = Depends(require_api_key),
+) -> JSONResponse:
+    """Assign or reassign a case to a reader/reviewer."""
+
+    try:
+        case = assign_case(
+            case_id,
+            reviewer=reviewer,
+            due_at=due_at,
+            needs_second_reader=needs_second_reader,
+            db_path=_db_path(),
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return JSONResponse({"case": case})
+
+
 @app.post("/cases/{case_id}/review")
 def review_case_endpoint(
     case_id: int,
@@ -251,6 +299,7 @@ def review_case_endpoint(
     notes: Optional[str] = Form(default=None),
     final_labels_json: str = Form("{}"),
     next_status: Optional[str] = Form(default=None),
+    review_round: Optional[int] = Form(default=None),
     _: None = Depends(require_api_key),
 ) -> JSONResponse:
     """Add a human reviewer decision for a case."""
@@ -266,6 +315,7 @@ def review_case_endpoint(
             notes=notes,
             final_labels=final_labels,
             next_status=next_status,
+            review_round=review_round,
             db_path=_db_path(),
         )
     except json.JSONDecodeError as exc:
