@@ -12,6 +12,7 @@ from .store import DEFAULT_DB_PATH, SQLiteStore, dumps_json, loads_json, utc_now
 VALID_CASE_STATUSES = {"pending", "reviewed", "deferred", "flagged", "archived"}
 VALID_PRIORITIES = {"routine", "elevated", "urgent"}
 VALID_REVIEW_DECISIONS = {"agree", "disagree", "uncertain", "defer", "flag"}
+SECOND_READER_DECISIONS = {"disagree", "uncertain", "defer", "flag"}
 
 
 def _coerce_store(store: SQLiteStore | None = None, db_path: str | Path = DEFAULT_DB_PATH) -> SQLiteStore:
@@ -32,6 +33,7 @@ def _hydrate_case(row: dict[str, Any] | None) -> dict[str, Any] | None:
     hydrated = dict(row)
     hydrated["tags"] = loads_json(hydrated.get("tags"), default=[])
     hydrated["patient_context"] = loads_json(hydrated.get("patient_context"), default={})
+    hydrated["needs_second_reader"] = bool(hydrated.get("needs_second_reader", False))
     return hydrated
 
 
@@ -60,6 +62,9 @@ def create_case(
     priority: str = "routine",
     patient_context: dict[str, Any] | None = None,
     tags: list[str] | None = None,
+    assigned_to: str | None = None,
+    due_at: str | None = None,
+    needs_second_reader: bool = False,
     store: SQLiteStore | None = None,
     db_path: str | Path = DEFAULT_DB_PATH,
 ) -> dict[str, Any]:
@@ -74,8 +79,9 @@ def create_case(
         """
         INSERT INTO cases(
             image_path, image_id, source_filename, model_name, status, priority,
-            patient_context, tags, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            patient_context, tags, assigned_to, due_at, needs_second_reader,
+            created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             image_path,
@@ -86,11 +92,24 @@ def create_case(
             priority,
             dumps_json(patient_context or {}),
             dumps_json(tags or []),
+            assigned_to,
+            due_at,
+            int(needs_second_reader),
             now,
             now,
         ),
     )
-    log_event(case_id, "case.created", {"image_path": image_path, "status": status}, store=store)
+    log_event(
+        case_id,
+        "case.created",
+        {
+            "image_path": image_path,
+            "status": status,
+            "assigned_to": assigned_to,
+            "needs_second_reader": bool(needs_second_reader),
+        },
+        store=store,
+    )
     case = get_case(case_id, store=store)
     assert case is not None
     return case
@@ -145,6 +164,9 @@ def create_case_with_prediction(
     priority: str = "routine",
     patient_context: dict[str, Any] | None = None,
     tags: list[str] | None = None,
+    assigned_to: str | None = None,
+    due_at: str | None = None,
+    needs_second_reader: bool = False,
     store: SQLiteStore | None = None,
     db_path: str | Path = DEFAULT_DB_PATH,
 ) -> dict[str, Any]:
@@ -159,6 +181,9 @@ def create_case_with_prediction(
         priority=priority,
         patient_context=patient_context,
         tags=tags,
+        assigned_to=assigned_to,
+        due_at=due_at,
+        needs_second_reader=needs_second_reader,
         store=store,
     )
     prediction = predict_image(image_path, model_name=model_name, top_k=top_k, threshold=threshold)
@@ -203,7 +228,7 @@ def list_reviews(case_id: int, *, store: SQLiteStore | None = None, db_path: str
 
     store = _coerce_store(store, db_path)
     rows = store.fetch_all(
-        "SELECT * FROM reviews WHERE case_id = ? ORDER BY created_at ASC, id ASC",
+        "SELECT * FROM reviews WHERE case_id = ? ORDER BY review_round ASC, created_at ASC, id ASC",
         (int(case_id),),
     )
     return [_hydrate_review(row) for row in rows]
@@ -227,12 +252,14 @@ def list_cases(
     *,
     status: str | None = None,
     priority: str | None = None,
+    assigned_to: str | None = None,
+    needs_second_reader: bool | None = None,
     limit: int = 50,
     offset: int = 0,
     store: SQLiteStore | None = None,
     db_path: str | Path = DEFAULT_DB_PATH,
 ) -> list[dict[str, Any]]:
-    """List cases with optional status and priority filtering."""
+    """List cases with optional workflow filtering."""
 
     store = _coerce_store(store, db_path)
     clauses: list[str] = []
@@ -243,6 +270,12 @@ def list_cases(
     if priority:
         clauses.append("priority = ?")
         params.append(_validate_choice(priority, VALID_PRIORITIES, "priority"))
+    if assigned_to:
+        clauses.append("assigned_to = ?")
+        params.append(assigned_to)
+    if needs_second_reader is not None:
+        clauses.append("needs_second_reader = ?")
+        params.append(int(needs_second_reader))
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     params.extend([int(limit), int(offset)])
     rows = store.fetch_all(
@@ -274,6 +307,41 @@ def update_case_status(
     return case
 
 
+def assign_case(
+    case_id: int,
+    *,
+    reviewer: str | None,
+    due_at: str | None = None,
+    needs_second_reader: bool | None = None,
+    store: SQLiteStore | None = None,
+    db_path: str | Path = DEFAULT_DB_PATH,
+) -> dict[str, Any]:
+    """Assign or reassign a case to a reviewer/reader."""
+
+    store = _coerce_store(store, db_path)
+    existing = get_case(case_id, store=store)
+    if existing is None:
+        raise KeyError(f"Case {case_id} not found")
+    second_reader = existing["needs_second_reader"] if needs_second_reader is None else bool(needs_second_reader)
+    store.execute(
+        """
+        UPDATE cases
+        SET assigned_to = ?, due_at = ?, needs_second_reader = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (reviewer, due_at, int(second_reader), utc_now_iso(), int(case_id)),
+    )
+    log_event(
+        case_id,
+        "case.assigned",
+        {"assigned_to": reviewer, "due_at": due_at, "needs_second_reader": second_reader},
+        store=store,
+    )
+    case = get_case(case_id, store=store)
+    assert case is not None
+    return case
+
+
 def add_review(
     case_id: int,
     *,
@@ -282,6 +350,7 @@ def add_review(
     notes: str | None = None,
     final_labels: dict[str, Any] | None = None,
     next_status: str | None = None,
+    review_round: int | None = None,
     store: SQLiteStore | None = None,
     db_path: str | Path = DEFAULT_DB_PATH,
 ) -> dict[str, Any]:
@@ -290,18 +359,39 @@ def add_review(
     decision = _validate_choice(decision, VALID_REVIEW_DECISIONS, "decision")
     store = _coerce_store(store, db_path)
     now = utc_now_iso()
+    if review_round is None:
+        prior = store.fetch_one("SELECT COUNT(*) AS count FROM reviews WHERE case_id = ?", (int(case_id),)) or {}
+        review_round = int(prior.get("count", 0) or 0) + 1
     review_id = store.execute(
         """
-        INSERT INTO reviews(case_id, reviewer, decision, notes, final_labels, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO reviews(case_id, reviewer, decision, notes, final_labels, review_round, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
-        (int(case_id), reviewer, decision, notes, dumps_json(final_labels or {}), now),
+        (int(case_id), reviewer, decision, notes, dumps_json(final_labels or {}), int(review_round), now),
     )
-    status = next_status
-    if status is None:
-        status = "deferred" if decision == "defer" else "flagged" if decision == "flag" else "reviewed"
-    update_case_status(case_id, status, store=store)
-    log_event(case_id, "review.created", {"review_id": review_id, "decision": decision}, store=store)
+    if next_status is None:
+        next_status = "deferred" if decision == "defer" else "flagged" if decision == "flag" else "reviewed"
+    needs_second_reader = decision in SECOND_READER_DECISIONS and int(review_round) == 1
+    store.execute(
+        """
+        UPDATE cases
+        SET status = ?, needs_second_reader = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (_validate_choice(next_status, VALID_CASE_STATUSES, "status"), int(needs_second_reader), utc_now_iso(), int(case_id)),
+    )
+    log_event(case_id, "case.status_updated", {"status": next_status}, store=store)
+    log_event(
+        case_id,
+        "review.created",
+        {
+            "review_id": review_id,
+            "decision": decision,
+            "review_round": int(review_round),
+            "needs_second_reader": needs_second_reader,
+        },
+        store=store,
+    )
     row = store.fetch_one("SELECT * FROM reviews WHERE id = ?", (review_id,))
     assert row is not None
     return _hydrate_review(row)
