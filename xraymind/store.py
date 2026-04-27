@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 DEFAULT_DB_PATH = "outputs/xraymind_cases.sqlite3"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def utc_now_iso() -> str:
@@ -62,7 +62,7 @@ class SQLiteStore:
             conn.close()
 
     def initialize(self) -> None:
-        """Create database tables if they do not already exist."""
+        """Create database tables and run additive schema migrations."""
 
         with sqlite3.connect(self.path) as conn:
             conn.execute("PRAGMA foreign_keys = ON")
@@ -83,6 +83,9 @@ class SQLiteStore:
                     priority TEXT NOT NULL DEFAULT 'routine',
                     patient_context TEXT,
                     tags TEXT,
+                    assigned_to TEXT,
+                    due_at TEXT,
+                    needs_second_reader INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -107,6 +110,7 @@ class SQLiteStore:
                     decision TEXT NOT NULL,
                     notes TEXT,
                     final_labels TEXT,
+                    review_round INTEGER NOT NULL DEFAULT 1,
                     created_at TEXT NOT NULL,
                     FOREIGN KEY(case_id) REFERENCES cases(id) ON DELETE CASCADE
                 );
@@ -119,9 +123,15 @@ class SQLiteStore:
                     created_at TEXT NOT NULL,
                     FOREIGN KEY(case_id) REFERENCES cases(id) ON DELETE SET NULL
                 );
-
+                """
+            )
+            self._migrate(conn)
+            conn.executescript(
+                """
                 CREATE INDEX IF NOT EXISTS idx_cases_status ON cases(status);
                 CREATE INDEX IF NOT EXISTS idx_cases_priority ON cases(priority);
+                CREATE INDEX IF NOT EXISTS idx_cases_assigned_to ON cases(assigned_to);
+                CREATE INDEX IF NOT EXISTS idx_cases_second_reader ON cases(needs_second_reader);
                 CREATE INDEX IF NOT EXISTS idx_predictions_case_id ON predictions(case_id);
                 CREATE INDEX IF NOT EXISTS idx_reviews_case_id ON reviews(case_id);
                 CREATE INDEX IF NOT EXISTS idx_audit_case_id ON audit_events(case_id);
@@ -131,6 +141,29 @@ class SQLiteStore:
                 "INSERT OR REPLACE INTO metadata(key, value) VALUES (?, ?)",
                 ("schema_version", str(SCHEMA_VERSION)),
             )
+
+    def _migrate(self, conn: sqlite3.Connection) -> None:
+        """Apply idempotent additive migrations for existing local SQLite DBs."""
+
+        table_columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(cases)").fetchall()
+        }
+        case_migrations = {
+            "assigned_to": "ALTER TABLE cases ADD COLUMN assigned_to TEXT",
+            "due_at": "ALTER TABLE cases ADD COLUMN due_at TEXT",
+            "needs_second_reader": "ALTER TABLE cases ADD COLUMN needs_second_reader INTEGER NOT NULL DEFAULT 0",
+        }
+        for column, statement in case_migrations.items():
+            if column not in table_columns:
+                conn.execute(statement)
+
+        review_columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(reviews)").fetchall()
+        }
+        if "review_round" not in review_columns:
+            conn.execute("ALTER TABLE reviews ADD COLUMN review_round INTEGER NOT NULL DEFAULT 1")
 
     def execute(self, query: str, params: tuple[Any, ...] = ()) -> int:
         """Execute a write query and return the last inserted row id."""
