@@ -1,8 +1,13 @@
 torch>=1.12
-torchvision>=0.5
+torchvision>=0.13
+torchxrayvision>=0.0.38
+captum>=0.5.0
+gradio>=4.0
+matplotlib>=3.2
 scikit-image>=0.16
+scikit-learn>=1.0
 tqdm>=4
 numpy>=1
 pandas>=1
 requests>=1
-pillow>=5.3.0
+pillow>=8.0
