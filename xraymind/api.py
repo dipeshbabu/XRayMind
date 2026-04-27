@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, List, Optional
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 
 from .audit import audit_prediction
 from .cases import (
@@ -23,12 +23,12 @@ from .config import DEFAULT_MODEL_NAME, DEFAULT_TOP_K, DISCLAIMER
 from .dashboard import cases_requiring_attention, dashboard_summary
 from .export import export_cases
 from .inference import predict_image
-from .monitoring import build_monitoring_snapshot, save_monitoring_snapshot
+from .monitoring import build_monitoring_markdown, build_monitoring_snapshot, save_monitoring_snapshot
 from .packet import create_study_packet
 from .store import DEFAULT_DB_PATH, SQLiteStore
 
 API_TITLE = "XRayMind API"
-API_VERSION = "1.1.0"
+API_VERSION = "1.2.0"
 
 app = FastAPI(
     title=API_TITLE,
@@ -321,19 +321,34 @@ def export_cases_endpoint(
 @app.get("/monitoring/snapshot")
 def monitoring_snapshot_endpoint(
     limit: int = 10_000,
+    subgroup_min_cases: int = 1,
     _: None = Depends(require_api_key),
 ) -> JSONResponse:
     """Return an in-memory monitoring snapshot without writing files."""
 
-    return JSONResponse(build_monitoring_snapshot(db_path=_db_path(), limit=limit))
+    return JSONResponse(build_monitoring_snapshot(db_path=_db_path(), limit=limit, subgroup_min_cases=subgroup_min_cases))
+
+
+@app.get("/monitoring/report.md", response_class=PlainTextResponse)
+def monitoring_markdown_report_endpoint(
+    limit: int = 10_000,
+    subgroup_min_cases: int = 1,
+    _: None = Depends(require_api_key),
+) -> str:
+    """Return a human-readable markdown validation report."""
+
+    snapshot = build_monitoring_snapshot(db_path=_db_path(), limit=limit, subgroup_min_cases=subgroup_min_cases)
+    return build_monitoring_markdown(snapshot)
 
 
 @app.post("/monitoring/snapshot")
 def save_monitoring_snapshot_endpoint(
     out: str = Form("outputs/monitoring/snapshot.json"),
+    markdown_out: Optional[str] = Form(default=None),
     baseline: Optional[str] = Form(default=None),
     limit: int = Form(10_000),
     drift_threshold: float = Form(0.15),
+    subgroup_min_cases: int = Form(1),
     _: None = Depends(require_api_key),
 ) -> JSONResponse:
     """Persist a monitoring snapshot and optionally compare it with a baseline snapshot."""
@@ -344,5 +359,7 @@ def save_monitoring_snapshot_endpoint(
         db_path=_db_path(),
         limit=limit,
         drift_threshold=drift_threshold,
+        markdown_out=markdown_out,
+        subgroup_min_cases=subgroup_min_cases,
     )
     return JSONResponse(snapshot)
