@@ -1,19 +1,28 @@
 # XRayMind
 
-XRayMind is an explainable chest X-ray research prototype built around TorchXRayVision models, Captum attribution methods, and a lightweight Gradio interface. The project is intended for AI/ML research demos, model inspection, benchmarking, and educational exploration of chest radiography classifiers.
+XRayMind is an explainable chest X-ray research prototype built around TorchXRayVision models, Captum attribution methods, reliability evaluation, and a lightweight Gradio interface. The project is intended for AI/ML research demos, model inspection, benchmarking, and educational exploration of chest radiography classifiers.
 
 > **Important:** XRayMind is not a medical device and is not for clinical diagnosis, treatment, or triage. Outputs must be reviewed by qualified clinical professionals.
 
 ---
 
-## What is new in v0.2
+## What is new in v0.3
+
+- Reliability metrics: Brier score, expected calibration error, sensitivity, specificity, precision, and F1.
+- Threshold tuning per pathology with F1 or Youden objective.
+- Bootstrap confidence intervals for AUROC and AUPRC.
+- Reliability diagram generation per label.
+- Model-card generator for evaluation summaries.
+- Dedicated reliability workflow documentation in `docs/V0_3_RELIABILITY.md`.
+
+## What changed in v0.2
 
 - Clean `xraymind/` Python package for reusable inference, preprocessing, explainability, and report generation.
 - Command-line interface with `predict`, `explain`, `report`, and `demo` commands.
 - Modern Gradio app in `app.py` for prediction, integrated-gradients heatmap generation, and downloadable HTML reports.
 - Structured JSON prediction output with top findings, thresholds, uncertainty metadata, and safety disclaimer.
 - HTML report generator for demos and research walkthroughs.
-- Folder-level evaluation script for AUROC/AUPRC benchmarking on labeled image folders.
+- Folder-level evaluation script for labeled image folders.
 - Existing legacy Gradio code under `src/` is preserved for backward compatibility.
 
 ---
@@ -89,7 +98,7 @@ image,Atelectasis,Cardiomegaly,Effusion
 000002.png,1,0,1
 ```
 
-Run:
+Run a basic evaluation:
 
 ```bash
 python scripts/evaluate_folder.py \
@@ -98,7 +107,43 @@ python scripts/evaluate_folder.py \
   --out outputs/eval.csv
 ```
 
-This produces per-label AUROC and AUPRC when both positive and negative examples are present.
+Run a fuller reliability evaluation:
+
+```bash
+python scripts/evaluate_folder.py \
+  --image-dir data/images \
+  --labels data/labels.csv \
+  --out outputs/eval.csv \
+  --predictions-out outputs/predictions.csv \
+  --tune-thresholds \
+  --threshold-objective f1 \
+  --bootstrap 1000 \
+  --save-plots
+```
+
+This produces per-label AUROC, AUPRC, Brier score, ECE, sensitivity, specificity, precision, F1, optional confidence intervals, and optional reliability plots.
+
+### Tune thresholds after inference
+
+```bash
+python scripts/tune_thresholds.py \
+  --labels data/labels.csv \
+  --predictions outputs/predictions.csv \
+  --out outputs/thresholds.csv \
+  --objective f1
+```
+
+### Generate a model card
+
+```bash
+python scripts/make_model_card.py \
+  --metrics outputs/eval.csv \
+  --model densenet121-res224-all \
+  --dataset "NIH ChestX-ray14 validation split" \
+  --out outputs/MODEL_CARD.md
+```
+
+See `docs/V0_3_RELIABILITY.md` for the full reliability workflow.
 
 ---
 
@@ -106,19 +151,26 @@ This produces per-label AUROC and AUPRC when both positive and negative examples
 
 ```text
 xraymind/
+  bootstrap.py        # bootstrap confidence intervals
   cli.py              # command-line interface
   config.py           # shared constants and safety disclaimer
   explainability.py   # Captum attribution utilities
   inference.py        # structured prediction output
+  metrics.py          # reliability metrics and threshold tuning
   model_loader.py     # cached TorchXRayVision model loading
+  plots.py            # reliability diagrams
   preprocessing.py    # image loading and X-ray preprocessing
   report.py           # HTML report generation
 scripts/
-  evaluate_folder.py  # labeled-folder benchmarking
+  evaluate_folder.py  # labeled-folder benchmarking with reliability metrics
+  make_model_card.py  # markdown model-card generator
   predict_image.py    # simple prediction script wrapper
+  tune_thresholds.py  # per-label threshold tuning
 src/
   legacy Gradio and ensemble code from the original prototype
 app.py                # modern Gradio demo
+docs/
+  V0_3_RELIABILITY.md # reliability workflow
 ```
 
 ---
@@ -126,7 +178,7 @@ app.py                # modern Gradio demo
 ## Current limitations
 
 - Predictions rely on pretrained TorchXRayVision models and should not be interpreted as clinically validated outputs for a new deployment setting.
-- Thresholds are currently simple defaults. A serious release should calibrate thresholds per dataset and pathology.
+- Thresholds tuned on one dataset should not be reused on another dataset without validation.
 - Heatmaps show model sensitivity, not confirmed disease location.
 - Evaluation currently assumes image-level binary labels, not radiologist-validated localization masks.
 - No DICOM metadata cleaning, PHI removal, PACS integration, or regulatory workflow is included.
@@ -134,13 +186,6 @@ app.py                # modern Gradio demo
 ---
 
 ## Concrete roadmap
-
-### v0.3: reliability and calibration
-
-- Add validation-set threshold tuning per pathology.
-- Add calibration metrics: ECE, Brier score, reliability diagrams.
-- Add bootstrap confidence intervals for AUROC/AUPRC.
-- Add model cards for each supported pretrained model.
 
 ### v0.4: clinician-facing reports
 
