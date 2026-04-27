@@ -172,9 +172,11 @@ def build_parser() -> argparse.ArgumentParser:
     monitor = subparsers.add_parser("monitor", help="Create or print a case workflow monitoring snapshot")
     monitor.add_argument("--db", default=DEFAULT_DB_PATH, help="SQLite workflow database path")
     monitor.add_argument("--out", default="outputs/monitoring/snapshot.json", help="Snapshot output JSON path")
+    monitor.add_argument("--markdown", default=None, help="Optional markdown validation report path")
     monitor.add_argument("--baseline", default=None, help="Optional previous snapshot for drift comparison")
     monitor.add_argument("--limit", type=int, default=10_000)
     monitor.add_argument("--drift-threshold", type=float, default=0.15)
+    monitor.add_argument("--subgroup-min-cases", type=int, default=1)
     monitor.add_argument("--no-write", action="store_true", help="Print snapshot without writing it to disk")
 
     subparsers.add_parser("demo", help="Launch the Gradio demo")
@@ -220,9 +222,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "report":
-        result = predict_image(
-            args.image, model_name=args.model, top_k=args.top_k, threshold=args.threshold
-        )
+        result = predict_image(args.image, model_name=args.model, top_k=args.top_k, threshold=args.threshold)
         save_prediction(result, args.json)
         original_path = save_original_preview(args.image, args.original)
         heatmap_path = None
@@ -235,13 +235,7 @@ def main(argv: list[str] | None = None) -> int:
                 model_name=args.model,
                 method=args.method,
             )
-        save_html_report(
-            result,
-            args.html,
-            heatmap_path=heatmap_path,
-            original_path=original_path,
-            image_id=args.image_id,
-        )
+        save_html_report(result, args.html, heatmap_path=heatmap_path, original_path=original_path, image_id=args.image_id)
         maybe_html_to_pdf(args.html, args.pdf)
         if args.audit_log:
             audit_prediction(args.image, args.model, args.audit_log, extra={"command": "report", "label": label})
@@ -297,17 +291,7 @@ def main(argv: list[str] | None = None) -> int:
             _print_json(result)
             return 0
         if args.case_command == "list":
-            _print_json(
-                {
-                    "cases": list_cases(
-                        status=args.status,
-                        priority=args.priority,
-                        limit=args.limit,
-                        offset=args.offset,
-                        db_path=args.db,
-                    )
-                }
-            )
+            _print_json({"cases": list_cases(status=args.status, priority=args.priority, limit=args.limit, offset=args.offset, db_path=args.db)})
             return 0
         if args.case_command == "show":
             _print_json(get_case_detail(args.case_id, db_path=args.db))
@@ -350,7 +334,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "monitor":
         if args.no_write:
-            snapshot = build_monitoring_snapshot(db_path=args.db, limit=args.limit)
+            snapshot = build_monitoring_snapshot(
+                db_path=args.db,
+                limit=args.limit,
+                subgroup_min_cases=args.subgroup_min_cases,
+            )
         else:
             snapshot = save_monitoring_snapshot(
                 args.out,
@@ -358,6 +346,8 @@ def main(argv: list[str] | None = None) -> int:
                 db_path=args.db,
                 limit=args.limit,
                 drift_threshold=args.drift_threshold,
+                markdown_out=args.markdown,
+                subgroup_min_cases=args.subgroup_min_cases,
             )
         _print_json(snapshot)
         return 0
