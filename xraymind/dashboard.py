@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .cases import _hydrate_case
 from .store import DEFAULT_DB_PATH, SQLiteStore
 
 
@@ -24,6 +25,14 @@ def dashboard_summary(*, store: SQLiteStore | None = None, db_path: str | Path =
     status_rows = store.fetch_all("SELECT status, COUNT(*) AS count FROM cases GROUP BY status")
     priority_rows = store.fetch_all("SELECT priority, COUNT(*) AS count FROM cases GROUP BY priority")
     review_rows = store.fetch_all("SELECT decision, COUNT(*) AS count FROM reviews GROUP BY decision")
+    assignment_rows = store.fetch_all(
+        """
+        SELECT COALESCE(assigned_to, 'unassigned') AS reviewer, COUNT(*) AS count
+        FROM cases
+        GROUP BY reviewer
+        ORDER BY count DESC, reviewer ASC
+        """
+    )
     label_rows = store.fetch_all(
         """
         SELECT json_extract(value.value, '$.label') AS label, COUNT(*) AS count
@@ -55,10 +64,13 @@ def dashboard_summary(*, store: SQLiteStore | None = None, db_path: str | Path =
         "deferred_cases": deferred_cases,
         "flagged_cases": flagged_cases,
         "low_confidence_cases": low_confidence_cases,
+        "second_reader_cases": _count(store, "SELECT COUNT(*) AS count FROM cases WHERE needs_second_reader = 1"),
+        "unassigned_cases": _count(store, "SELECT COUNT(*) AS count FROM cases WHERE assigned_to IS NULL OR assigned_to = ''"),
         "total_reviews": total_reviews,
         "reviewer_disagreement_rate": round(disagreement_reviews / total_reviews, 6) if total_reviews else 0.0,
         "status_counts": {row["status"]: int(row["count"]) for row in status_rows},
         "priority_counts": {row["priority"]: int(row["count"]) for row in priority_rows},
+        "assignment_counts": {row["reviewer"]: int(row["count"]) for row in assignment_rows},
         "review_decision_counts": {row["decision"]: int(row["count"]) for row in review_rows},
         "top_alert_labels": [
             {"label": row["label"], "count": int(row["count"])} for row in label_rows if row.get("label")
@@ -70,7 +82,7 @@ def cases_requiring_attention(*, store: SQLiteStore | None = None, db_path: str 
     """Return cases that should be prioritized for human review."""
 
     store = _coerce_store(store, db_path)
-    return store.fetch_all(
+    rows = store.fetch_all(
         """
         SELECT
             cases.*,
@@ -86,7 +98,9 @@ def cases_requiring_attention(*, store: SQLiteStore | None = None, db_path: str 
         )
         WHERE cases.status IN ('pending', 'deferred', 'flagged')
            OR predictions.low_confidence = 1
+           OR cases.needs_second_reader = 1
         ORDER BY
+            CASE cases.needs_second_reader WHEN 1 THEN 0 ELSE 1 END,
             CASE cases.priority WHEN 'urgent' THEN 0 WHEN 'elevated' THEN 1 ELSE 2 END,
             CASE cases.status WHEN 'flagged' THEN 0 WHEN 'deferred' THEN 1 WHEN 'pending' THEN 2 ELSE 3 END,
             cases.created_at DESC
@@ -94,3 +108,9 @@ def cases_requiring_attention(*, store: SQLiteStore | None = None, db_path: str 
         """,
         (int(limit),),
     )
+    hydrated: list[dict[str, Any]] = []
+    for row in rows:
+        case = _hydrate_case(row)
+        if case is not None:
+            hydrated.append(case)
+    return hydrated
