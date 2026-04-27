@@ -11,7 +11,7 @@ import os
 from dataclasses import dataclass
 from typing import Callable
 
-from fastapi import Header, HTTPException
+from fastapi import Depends, Header, HTTPException
 
 ROLE_ORDER = {"viewer": 0, "reviewer": 1, "admin": 2}
 
@@ -63,8 +63,21 @@ def configured_principals() -> dict[str, ApiPrincipal]:
     role_keys = _parse_role_keys(os.getenv("XRAYMIND_API_KEYS"))
     legacy = os.getenv("XRAYMIND_API_KEY")
     if legacy and legacy not in role_keys:
-        role_keys[legacy] = ApiPrincipal(key_id="legacy", role=os.getenv("XRAYMIND_API_KEY_ROLE", "admin").lower())
+        legacy_role = os.getenv("XRAYMIND_API_KEY_ROLE", "admin").lower()
+        if legacy_role not in ROLE_ORDER:
+            raise ValueError(f"Unsupported legacy API key role: {legacy_role!r}")
+        role_keys[legacy] = ApiPrincipal(key_id="legacy", role=legacy_role)
     return role_keys
+
+
+def auth_mode() -> str:
+    """Return the currently active auth mode for health/debug output."""
+
+    if os.getenv("XRAYMIND_API_KEYS"):
+        return "role_keys"
+    if os.getenv("XRAYMIND_API_KEY"):
+        return "single_key"
+    return "dev_open"
 
 
 def require_api_key(x_api_key: str | None = Header(default=None)) -> ApiPrincipal:
@@ -80,23 +93,17 @@ def require_api_key(x_api_key: str | None = Header(default=None)) -> ApiPrincipa
     principal = principals.get(x_api_key or "")
     if principal is None:
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
-    if principal.role not in ROLE_ORDER:
-        raise HTTPException(status_code=500, detail="Configured API key has an invalid role")
     return principal
 
 
 def require_role(min_role: str) -> Callable[[ApiPrincipal], ApiPrincipal]:
-    """Build a dependency that requires at least min_role."""
+    """Build a FastAPI dependency that requires at least min_role."""
 
     min_role = min_role.lower()
     if min_role not in ROLE_ORDER:
         raise ValueError(f"Unknown role: {min_role}")
 
-    def dependency(principal: ApiPrincipal = Header(default=None)) -> ApiPrincipal:  # type: ignore[assignment]
-        # This function body is replaced below by FastAPI dependency injection.
-        return principal
-
-    async def _dependency(principal: ApiPrincipal = __import__("fastapi").Depends(require_api_key)) -> ApiPrincipal:
+    async def _dependency(principal: ApiPrincipal = Depends(require_api_key)) -> ApiPrincipal:
         if ROLE_ORDER[principal.role] < ROLE_ORDER[min_role]:
             raise HTTPException(status_code=403, detail=f"Requires {min_role} role")
         return principal
