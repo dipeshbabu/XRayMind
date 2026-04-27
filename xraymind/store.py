@@ -65,6 +65,7 @@ class SQLiteStore:
         """Create database tables and run additive schema migrations."""
 
         with sqlite3.connect(self.path) as conn:
+            conn.row_factory = dict_factory
             conn.execute("PRAGMA foreign_keys = ON")
             conn.executescript(
                 """
@@ -162,10 +163,7 @@ class SQLiteStore:
     def _migrate(self, conn: sqlite3.Connection) -> None:
         """Apply idempotent additive migrations for existing local SQLite DBs."""
 
-        table_columns = {
-            row["name"]
-            for row in conn.execute("PRAGMA table_info(cases)").fetchall()
-        }
+        table_columns = {row["name"] for row in conn.execute("PRAGMA table_info(cases)").fetchall()}
         case_migrations = {
             "assigned_to": "ALTER TABLE cases ADD COLUMN assigned_to TEXT",
             "due_at": "ALTER TABLE cases ADD COLUMN due_at TEXT",
@@ -175,10 +173,7 @@ class SQLiteStore:
             if column not in table_columns:
                 conn.execute(statement)
 
-        review_columns = {
-            row["name"]
-            for row in conn.execute("PRAGMA table_info(reviews)").fetchall()
-        }
+        review_columns = {row["name"] for row in conn.execute("PRAGMA table_info(reviews)").fetchall()}
         if "review_round" not in review_columns:
             conn.execute("ALTER TABLE reviews ADD COLUMN review_round INTEGER NOT NULL DEFAULT 1")
 
