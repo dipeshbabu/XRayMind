@@ -1,0 +1,11 @@
+services:
+  xraymind-api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      XRAYMIND_API_KEY: ${XRAYMIND_API_KEY:-}
+      XRAYMIND_PACKET_DIR: /app/outputs/api_packets
+    volumes:
+      - ./outputs:/app/outputs
+    command: uvicorn xraymind.api:app --host 0.0.0.0 --port 8000
