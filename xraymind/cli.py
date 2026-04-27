@@ -7,7 +7,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+from .audit import audit_prediction
 from .config import DEFAULT_MODEL_NAME, DEFAULT_TOP_K
+from .dicom import dicom_to_png, redact_dicom, write_safe_metadata_json
 from .explainability import explain_to_file
 from .inference import predict_image, save_prediction
 from .packet import create_study_packet
@@ -18,6 +20,10 @@ from .visualization import save_original_preview
 
 def _add_common_model_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--model", default=DEFAULT_MODEL_NAME, help="TorchXRayVision model name")
+
+
+def _add_audit_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--audit-log", default=None, help="Optional JSONL audit log path")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -33,6 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
     predict.add_argument("--threshold", type=float, default=0.5)
     predict.add_argument("--html", default=None, help="Optional HTML report path")
     _add_common_model_args(predict)
+    _add_audit_arg(predict)
 
     explain = subparsers.add_parser("explain", help="Generate an attribution heatmap")
     explain.add_argument("--image", required=True, help="Path to chest X-ray image")
@@ -62,6 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["saliency", "input_x_gradient", "integrated_gradients"],
     )
     _add_common_model_args(report)
+    _add_audit_arg(report)
 
     packet = subparsers.add_parser("packet", help="Create a complete single-image study packet")
     packet.add_argument("--image", required=True, help="Path to chest X-ray image")
@@ -77,6 +85,13 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["saliency", "input_x_gradient", "integrated_gradients"],
     )
     _add_common_model_args(packet)
+    _add_audit_arg(packet)
+
+    dicom = subparsers.add_parser("dicom", help="Convert/redact DICOM files")
+    dicom.add_argument("--dicom", required=True, help="Input DICOM path")
+    dicom.add_argument("--png", default="outputs/dicom/preview.png", help="Output PNG path")
+    dicom.add_argument("--metadata", default=None, help="Optional safe metadata JSON path")
+    dicom.add_argument("--redacted", default=None, help="Optional redacted DICOM output path")
 
     subparsers.add_parser("demo", help="Launch the Gradio demo")
     return parser
@@ -92,6 +107,8 @@ def main(argv: list[str] | None = None) -> int:
         save_prediction(result, args.out)
         if args.html:
             save_html_report(result, args.html)
+        if args.audit_log:
+            audit_prediction(args.image, args.model, args.audit_log, extra={"command": "predict"})
         print(f"Prediction saved to {args.out}")
         return 0
 
@@ -130,6 +147,8 @@ def main(argv: list[str] | None = None) -> int:
             image_id=args.image_id,
         )
         maybe_html_to_pdf(args.html, args.pdf)
+        if args.audit_log:
+            audit_prediction(args.image, args.model, args.audit_log, extra={"command": "report", "label": label})
         print(f"Prediction saved to {args.json}")
         print(f"Report saved to {args.html}")
         if args.pdf:
@@ -148,9 +167,22 @@ def main(argv: list[str] | None = None) -> int:
             make_pdf=args.pdf,
             image_id=args.image_id,
         )
+        if args.audit_log:
+            audit_prediction(args.image, args.model, args.audit_log, extra={"command": "packet", "out_dir": args.out_dir})
         print(f"Study packet saved to {args.out_dir}")
         print(f"Manifest: {manifest['files']['manifest']}")
         print(f"ZIP: {manifest['files']['zip']}")
+        return 0
+
+    if args.command == "dicom":
+        png_path = dicom_to_png(args.dicom, args.png)
+        print(f"Saved PNG preview to {png_path}")
+        if args.metadata:
+            metadata_path = write_safe_metadata_json(args.dicom, args.metadata)
+            print(f"Saved safe metadata to {metadata_path}")
+        if args.redacted:
+            redacted_path = redact_dicom(args.dicom, args.redacted)
+            print(f"Saved redacted DICOM copy to {redacted_path}")
         return 0
 
     if args.command == "demo":
