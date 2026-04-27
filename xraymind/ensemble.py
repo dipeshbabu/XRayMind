@@ -28,7 +28,8 @@ def ensemble_from_prediction_frames(
     - `<label>_ensemble_std`: standard deviation across model probabilities.
     - `<label>_ensemble_range`: max minus min model probability.
     - `<label>_ensemble_entropy`: binary entropy of the ensemble mean.
-    - `<label>_confidence`: confidence score used by selective prediction.
+    - `<label>_ensemble_uncertainty`: selected uncertainty score.
+    - `<label>_confidence`: dataset-level confidence score used by selective prediction.
     - `<label>__<model>`: raw probability from each member model.
     """
 
@@ -78,17 +79,24 @@ def ensemble_from_prediction_frames(
             out[f"{label}_ensemble_range"] = range_prob
             out[f"{label}_ensemble_entropy"] = entropy
             out[f"{label}_ensemble_uncertainty"] = float(uncertainty)
-            out[f"{label}_confidence"] = float(
-                combined_confidence(
-                    y_score=np.asarray([mean_prob]),
-                    uncertainty=np.asarray([uncertainty]),
-                    uncertainty_weight=confidence_uncertainty_weight,
-                )[0]
-            )
             for col in member_cols:
                 out[col] = float(row[col])
         records.append(out)
-    return pd.DataFrame(records)
+
+    ensemble = pd.DataFrame(records)
+
+    # Important: confidence-from-uncertainty is a dataset-level ranking. Computing it
+    # one row at a time collapses min-max normalization to a neutral value and makes
+    # uncertainty-aware selective prediction weaker than intended.
+    for label in labels:
+        uncertainty_col = f"{label}_ensemble_uncertainty"
+        if label in ensemble.columns and uncertainty_col in ensemble.columns:
+            ensemble[f"{label}_confidence"] = combined_confidence(
+                y_score=ensemble[label].astype(float).to_numpy(),
+                uncertainty=ensemble[uncertainty_col].astype(float).to_numpy(),
+                uncertainty_weight=confidence_uncertainty_weight,
+            )
+    return ensemble
 
 
 def run_ensemble_predictions(
