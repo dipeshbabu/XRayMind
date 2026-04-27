@@ -19,8 +19,10 @@ from .cases import (
 from .config import DEFAULT_MODEL_NAME, DEFAULT_TOP_K
 from .dashboard import cases_requiring_attention, dashboard_summary
 from .dicom import dicom_to_png, redact_dicom, write_safe_metadata_json
+from .export import export_cases
 from .explainability import explain_to_file
 from .inference import predict_image, save_prediction
+from .monitoring import build_monitoring_snapshot, save_monitoring_snapshot
 from .packet import create_study_packet
 from .pdf import maybe_html_to_pdf
 from .report import save_html_report
@@ -158,6 +160,22 @@ def build_parser() -> argparse.ArgumentParser:
     dashboard.add_argument("--db", default=DEFAULT_DB_PATH)
     dashboard.add_argument("--attention", action="store_true", help="Show cases requiring attention instead of summary")
     dashboard.add_argument("--limit", type=int, default=25)
+
+    export = subparsers.add_parser("export", help="Export case workflow data to CSV/JSONL")
+    export.add_argument("--db", default=DEFAULT_DB_PATH, help="SQLite workflow database path")
+    export.add_argument("--out-dir", default="outputs/exports", help="Export directory")
+    export.add_argument("--status", default=None, help="Optional status filter")
+    export.add_argument("--priority", default=None, help="Optional priority filter")
+    export.add_argument("--limit", type=int, default=10_000)
+    export.add_argument("--offset", type=int, default=0)
+
+    monitor = subparsers.add_parser("monitor", help="Create or print a case workflow monitoring snapshot")
+    monitor.add_argument("--db", default=DEFAULT_DB_PATH, help="SQLite workflow database path")
+    monitor.add_argument("--out", default="outputs/monitoring/snapshot.json", help="Snapshot output JSON path")
+    monitor.add_argument("--baseline", default=None, help="Optional previous snapshot for drift comparison")
+    monitor.add_argument("--limit", type=int, default=10_000)
+    monitor.add_argument("--drift-threshold", type=float, default=0.15)
+    monitor.add_argument("--no-write", action="store_true", help="Print snapshot without writing it to disk")
 
     subparsers.add_parser("demo", help="Launch the Gradio demo")
     return parser
@@ -316,6 +334,32 @@ def main(argv: list[str] | None = None) -> int:
             _print_json({"cases": cases_requiring_attention(db_path=args.db, limit=args.limit)})
         else:
             _print_json(dashboard_summary(db_path=args.db))
+        return 0
+
+    if args.command == "export":
+        manifest = export_cases(
+            args.out_dir,
+            status=args.status,
+            priority=args.priority,
+            limit=args.limit,
+            offset=args.offset,
+            db_path=args.db,
+        )
+        _print_json(manifest)
+        return 0
+
+    if args.command == "monitor":
+        if args.no_write:
+            snapshot = build_monitoring_snapshot(db_path=args.db, limit=args.limit)
+        else:
+            snapshot = save_monitoring_snapshot(
+                args.out,
+                baseline=args.baseline,
+                db_path=args.db,
+                limit=args.limit,
+                drift_threshold=args.drift_threshold,
+            )
+        _print_json(snapshot)
         return 0
 
     if args.command == "demo":
