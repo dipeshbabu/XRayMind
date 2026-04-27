@@ -23,6 +23,7 @@ from xraymind.evaluation import (
     evaluate_subgroups,
     label_columns,
     run_predictions,
+    write_benchmark_model_card,
     write_dataset_card,
     write_run_manifest,
 )
@@ -61,6 +62,7 @@ def main() -> int:
     all_subgroup_rows = []
     prediction_paths = {}
     metric_paths = {}
+    model_card_paths = {}
 
     dataset_card_path = write_dataset_card(
         labels_df,
@@ -107,6 +109,7 @@ def main() -> int:
         metric_paths[model_name] = str(metrics_path)
         all_metric_rows.append(metrics_df)
 
+        subgroup_path = None
         if args.subgroups:
             subgroup_df = evaluate_subgroups(
                 labels_df=labels_df,
@@ -123,6 +126,15 @@ def main() -> int:
                 subgroup_path = model_dir / "subgroup_metrics.csv"
                 subgroup_df.to_csv(subgroup_path, index=False)
                 all_subgroup_rows.append(subgroup_df)
+
+        model_card_path = write_benchmark_model_card(
+            metrics_df=metrics_df.drop(columns=["model"], errors="ignore"),
+            output_path=model_dir / "MODEL_CARD.md",
+            model_name=model_name,
+            dataset_name=args.dataset_name,
+            subgroup_metrics_path=subgroup_path,
+        )
+        model_card_paths[model_name] = str(model_card_path)
 
     combined_metrics = pd.concat(all_metric_rows, ignore_index=True) if all_metric_rows else pd.DataFrame()
     combined_metrics_path = out_dir / "combined_metrics.csv"
@@ -171,6 +183,7 @@ def main() -> int:
             "leaderboard": str(summary_path),
             "predictions": prediction_paths,
             "metrics": metric_paths,
+            "model_cards": model_card_paths,
         },
     )
 
