@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -15,6 +16,7 @@ from .inference import predict_image, save_prediction
 from .packet import create_study_packet
 from .pdf import maybe_html_to_pdf
 from .report import save_html_report
+from .tta import predict_with_tta
 from .visualization import save_original_preview
 
 
@@ -40,6 +42,14 @@ def build_parser() -> argparse.ArgumentParser:
     predict.add_argument("--html", default=None, help="Optional HTML report path")
     _add_common_model_args(predict)
     _add_audit_arg(predict)
+
+    tta = subparsers.add_parser("tta", help="Run test-time augmentation uncertainty prediction")
+    tta.add_argument("--image", required=True, help="Path to chest X-ray image")
+    tta.add_argument("--out", default="outputs/tta_prediction.json", help="Output JSON path")
+    tta.add_argument("--top-k", type=int, default=DEFAULT_TOP_K)
+    tta.add_argument("--threshold", type=float, default=0.5)
+    _add_common_model_args(tta)
+    _add_audit_arg(tta)
 
     explain = subparsers.add_parser("explain", help="Generate an attribution heatmap")
     explain.add_argument("--image", required=True, help="Path to chest X-ray image")
@@ -110,6 +120,18 @@ def main(argv: list[str] | None = None) -> int:
         if args.audit_log:
             audit_prediction(args.image, args.model, args.audit_log, extra={"command": "predict"})
         print(f"Prediction saved to {args.out}")
+        return 0
+
+    if args.command == "tta":
+        result = predict_with_tta(
+            args.image, model_name=args.model, top_k=args.top_k, threshold=args.threshold
+        )
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(result, indent=2), encoding="utf-8")
+        if args.audit_log:
+            audit_prediction(args.image, args.model, args.audit_log, extra={"command": "tta"})
+        print(f"TTA prediction saved to {args.out}")
         return 0
 
     if args.command == "explain":
