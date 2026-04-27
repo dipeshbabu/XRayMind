@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 CaseStatus = Literal["pending", "reviewed", "deferred", "flagged", "archived"]
 CasePriority = Literal["routine", "elevated", "urgent"]
 ReviewDecision = Literal["agree", "disagree", "uncertain", "defer", "flag"]
+JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 
 
 class ServiceHealth(BaseModel):
@@ -60,6 +61,21 @@ class ReviewRecord(BaseModel):
     created_at: str
 
 
+class HostedJobRecord(BaseModel):
+    id: int
+    tenant_id: str
+    job_type: str
+    status: JobStatus
+    payload: dict[str, Any]
+    result: dict[str, Any] | None = None
+    error: dict[str, Any] | None = None
+    attempts: int = 0
+    created_at: str
+    updated_at: str
+    started_at: str | None = None
+    completed_at: str | None = None
+
+
 class CaseDetailResponse(BaseModel):
     case: CaseRecord
     latest_prediction: PredictionRecord | None = None
@@ -71,8 +87,17 @@ class CaseListResponse(BaseModel):
     count: int
 
 
+class JobListResponse(BaseModel):
+    jobs: list[HostedJobRecord]
+    count: int
+
+
 class CaseEnvelope(BaseModel):
     case: CaseRecord
+
+
+class HostedJobEnvelope(BaseModel):
+    job: HostedJobRecord | None = None
 
 
 class ReviewEnvelope(BaseModel):
