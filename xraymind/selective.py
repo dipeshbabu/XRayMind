@@ -30,12 +30,55 @@ def entropy_uncertainty(y_score: np.ndarray, eps: float = 1e-8) -> np.ndarray:
     return -(scores * np.log(scores) + (1.0 - scores) * np.log(1.0 - scores))
 
 
+def confidence_from_uncertainty(uncertainty: Sequence[float]) -> np.ndarray:
+    """Convert an uncertainty vector into an ordering-compatible confidence score.
+
+    Lower uncertainty should mean higher confidence. The returned score is min-max
+    normalized to [0, 1], where 1 is most confident. Constant uncertainty receives
+    a neutral confidence of 0.5 for every case.
+    """
+
+    values = np.asarray(uncertainty, dtype=float)
+    if len(values) == 0:
+        return values
+    finite = np.isfinite(values)
+    if not finite.any():
+        return np.full_like(values, 0.5, dtype=float)
+    clean = values.copy()
+    clean[~finite] = np.nanmax(clean[finite])
+    lo = float(np.min(clean))
+    hi = float(np.max(clean))
+    if np.isclose(lo, hi):
+        return np.full_like(clean, 0.5, dtype=float)
+    return 1.0 - ((clean - lo) / (hi - lo))
+
+
+def combined_confidence(
+    y_score: Sequence[float],
+    uncertainty: Sequence[float] | None = None,
+    uncertainty_weight: float = 0.5,
+) -> np.ndarray:
+    """Blend probability-margin confidence with optional uncertainty confidence.
+
+    `uncertainty_weight=0` uses only probability distance from 0.5.
+    `uncertainty_weight=1` uses only the supplied uncertainty ranking.
+    """
+
+    margin_conf = confidence_from_probability(np.asarray(y_score, dtype=float))
+    if uncertainty is None:
+        return margin_conf
+    uncertainty_conf = confidence_from_uncertainty(uncertainty)
+    w = float(np.clip(uncertainty_weight, 0.0, 1.0))
+    return ((1.0 - w) * margin_conf) + (w * uncertainty_conf)
+
+
 def selective_curve_for_label(
     y_true: Sequence[int],
     y_score: Sequence[float],
     label: str,
     threshold: float = 0.5,
     coverage_grid: Sequence[float] | None = None,
+    confidence: Sequence[float] | None = None,
 ) -> pd.DataFrame:
     """Compute metrics as progressively less-confident cases are deferred."""
 
@@ -46,8 +89,10 @@ def selective_curve_for_label(
     if len(y_true_arr) == 0:
         return pd.DataFrame()
 
-    confidence = confidence_from_probability(y_score_arr)
-    order = np.argsort(-confidence)
+    confidence_arr = np.asarray(confidence, dtype=float) if confidence is not None else confidence_from_probability(y_score_arr)
+    if len(confidence_arr) != len(y_true_arr):
+        raise ValueError("confidence must have the same length as y_true")
+    order = np.argsort(-confidence_arr)
     grid = list(coverage_grid or np.round(np.linspace(0.1, 1.0, 10), 2))
     rows: List[Dict[str, float | int | str | None]] = []
 
@@ -67,8 +112,8 @@ def selective_curve_for_label(
                 "defer_rate": float(1.0 - (k / len(y_true_arr))),
                 "n_evaluated": int(k),
                 "n_deferred": int(len(y_true_arr) - k),
-                "mean_confidence": float(np.mean(confidence[selected])),
-                "min_confidence": float(np.min(confidence[selected])),
+                "mean_confidence": float(np.mean(confidence_arr[selected])),
+                "min_confidence": float(np.min(confidence_arr[selected])),
                 "selective_accuracy": accuracy,
                 "selective_risk": risk,
                 "auroc": float(roc_auc_score(selected_true, selected_score)) if has_both else None,
@@ -89,8 +134,17 @@ def evaluate_selective_predictions(
     labels: Sequence[str] | None = None,
     threshold: float = 0.5,
     coverage_grid: Sequence[float] | None = None,
+    confidence_suffix: str = "_confidence",
+    uncertainty_suffix: str | None = None,
+    uncertainty_weight: float = 0.5,
 ) -> pd.DataFrame:
-    """Evaluate selective prediction curves for all labels."""
+    """Evaluate selective prediction curves for all labels.
+
+    If `<label>_confidence` exists in `pred_df`, it is used to rank cases for
+    deferral. Otherwise, if `uncertainty_suffix` is provided and the matching
+    column exists, the uncertainty is blended with probability-margin confidence.
+    Otherwise, probability distance from 0.5 is used.
+    """
 
     merged = labels_df.merge(pred_df, on=image_column, suffixes=("_true", "_pred"))
     label_names = list(labels or [c for c in labels_df.columns if c != image_column])
@@ -98,12 +152,23 @@ def evaluate_selective_predictions(
     for label in label_names:
         true_col = f"{label}_true" if f"{label}_true" in merged.columns else label
         pred_col = f"{label}_pred" if f"{label}_pred" in merged.columns else label
+        conf_col = f"{label}{confidence_suffix}"
+        uncertainty_col = f"{label}{uncertainty_suffix}" if uncertainty_suffix else None
         if true_col not in merged.columns or pred_col not in merged.columns:
             continue
         y_true = merged[true_col].astype(int).to_numpy()
         y_score = merged[pred_col].astype(float).to_numpy()
         if len(set(y_true.tolist())) < 2:
             continue
+        confidence = None
+        if conf_col in merged.columns:
+            confidence = merged[conf_col].astype(float).to_numpy()
+        elif uncertainty_col and uncertainty_col in merged.columns:
+            confidence = combined_confidence(
+                y_score=y_score,
+                uncertainty=merged[uncertainty_col].astype(float).to_numpy(),
+                uncertainty_weight=uncertainty_weight,
+            )
         frames.append(
             selective_curve_for_label(
                 y_true=y_true,
@@ -111,6 +176,7 @@ def evaluate_selective_predictions(
                 label=label,
                 threshold=threshold,
                 coverage_grid=coverage_grid,
+                confidence=confidence,
             )
         )
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
@@ -173,6 +239,7 @@ def write_selective_report(
     dataset_name: str,
     model_name: str,
     plot_path: str | Path | None = None,
+    confidence_method: str = "probability_margin",
 ) -> Path:
     """Write a Markdown report for selective prediction results."""
 
@@ -180,6 +247,7 @@ def write_selective_report(
         f"# Selective Prediction Report: {model_name}",
         "",
         f"Dataset: {dataset_name}",
+        f"Confidence method: `{confidence_method}`",
         "",
         "## What this measures",
         "Selective prediction evaluates performance after deferring the least-confident cases. This approximates a human-in-the-loop workflow where uncertain cases are escalated instead of receiving an automatic prediction.",
