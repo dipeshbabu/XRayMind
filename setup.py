@@ -2,8 +2,8 @@ from setuptools import find_packages, setup
 
 setup(
     name="xraymind",
-    version="0.5.0",
-    description="Explainable chest X-ray inference, DICOM ingestion, reporting, API deployment, and reliability evaluation for research demos.",
+    version="0.6.0",
+    description="Explainable chest X-ray inference, DICOM ingestion, hosted API deployment, uncertainty, and research-grade reliability evaluation.",
     packages=find_packages(),
     install_requires=[
         "torch>=1.12",
