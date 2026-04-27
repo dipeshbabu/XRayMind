@@ -1,12 +1,23 @@
 # XRayMind
 
-XRayMind is an explainable chest X-ray research prototype built around TorchXRayVision models, Captum attribution methods, reliability evaluation, reporting, and a lightweight Gradio interface. The project is intended for AI/ML research demos, model inspection, benchmarking, and educational exploration of chest radiography classifiers.
+XRayMind is an explainable chest X-ray research prototype built around TorchXRayVision models, Captum attribution methods, reliability evaluation, reporting, DICOM ingestion, hosted API inference, and a lightweight Gradio interface. The project is intended for AI/ML research demos, model inspection, benchmarking, and educational exploration of chest radiography classifiers.
 
 > **Important:** XRayMind is not a medical device and is not for clinical diagnosis, treatment, or triage. Outputs must be reviewed by qualified clinical professionals.
 
 ---
 
-## What is new in v0.4
+## What is new in v0.5
+
+- Optional DICOM ingestion for `.dcm` / `.dicom` inputs.
+- DICOM-to-PNG conversion script with safe metadata export.
+- Research helper for redacting common direct-identifying DICOM fields.
+- FastAPI service for single-image prediction, batch prediction, and downloadable study-packet ZIPs.
+- Optional API-key protection for hosted demos via `XRAYMIND_API_KEY`.
+- JSONL audit logging for CLI and API workflows without storing raw image data.
+- Dockerfile and Docker Compose setup for local hosted deployment.
+- Dedicated API documentation in `docs/api.md`.
+
+## What changed in v0.4
 
 - Study-packet generation for single-image research/demo workflows.
 - Standardized original image preview.
@@ -36,6 +47,12 @@ cd XRayMind
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
 pip install -e .
+```
+
+Or install runtime dependencies directly:
+
+```bash
+pip install -r requirements.txt
 ```
 
 For optional PDF export:
@@ -68,7 +85,26 @@ xraymind demo
 xraymind predict \
   --image path/to/chest_xray.png \
   --out outputs/prediction.json \
-  --top-k 5
+  --top-k 5 \
+  --audit-log outputs/audit/audit.jsonl
+```
+
+DICOM files are also supported when `pydicom` is installed:
+
+```bash
+xraymind predict \
+  --image path/to/case.dcm \
+  --out outputs/prediction.json
+```
+
+### Convert or redact a DICOM file
+
+```bash
+xraymind dicom \
+  --dicom path/to/case.dcm \
+  --png outputs/dicom/case.png \
+  --metadata outputs/dicom/case_metadata.json \
+  --redacted outputs/dicom/case_redacted.dcm
 ```
 
 ### Generate an explanation heatmap
@@ -111,6 +147,29 @@ xraymind packet \
   --out-dir outputs/study_packet \
   --pdf
 ```
+
+### Run the hosted API
+
+```bash
+uvicorn xraymind.api:app --reload --host 0.0.0.0 --port 8000
+```
+
+Optional API key:
+
+```bash
+export XRAYMIND_API_KEY=change-me
+curl -X POST http://localhost:8000/predict \
+  -H "X-API-Key: change-me" \
+  -F "file=@path/to/chest_xray.png"
+```
+
+Docker:
+
+```bash
+XRAYMIND_API_KEY=change-me docker compose up --build
+```
+
+See `docs/api.md` for the full API workflow.
 
 ### Create a JSON + HTML report
 
@@ -192,9 +251,12 @@ See `docs/V0_3_RELIABILITY.md` for the full reliability workflow.
 
 ```text
 xraymind/
+  api.py              # FastAPI hosted inference service
+  audit.py            # JSONL audit logging helpers
   bootstrap.py        # bootstrap confidence intervals
   cli.py              # command-line interface
   config.py           # shared constants and safety disclaimer
+  dicom.py            # DICOM ingestion, conversion, and redaction helpers
   explainability.py   # Captum attribution utilities
   inference.py        # structured prediction output
   metrics.py          # reliability metrics and threshold tuning
@@ -207,6 +269,7 @@ xraymind/
   visualization.py    # original previews, overlays, and side-by-side panels
 scripts/
   create_study_packet.py # full packet script wrapper
+  dicom_to_png.py        # DICOM conversion/redaction wrapper
   evaluate_folder.py     # labeled-folder benchmarking with reliability metrics
   make_model_card.py     # markdown model-card generator
   predict_image.py       # simple prediction script wrapper
@@ -215,6 +278,7 @@ src/
   legacy Gradio and ensemble code from the original prototype
 app.py                   # modern Gradio demo
 docs/
+  api.md                 # hosted API, DICOM, Docker, and audit workflow
   V0_3_RELIABILITY.md    # reliability workflow
   V0_4_REPORTING.md      # reporting workflow
 ```
@@ -227,19 +291,12 @@ docs/
 - Thresholds tuned on one dataset should not be reused on another dataset without validation.
 - Heatmaps and overlays show model sensitivity, not confirmed disease location.
 - Evaluation currently assumes image-level binary labels, not radiologist-validated localization masks.
-- No DICOM metadata cleaning, PHI removal, PACS integration, or regulatory workflow is included.
+- DICOM redaction is a convenience helper, not a complete HIPAA de-identification pipeline.
+- The hosted API is suitable for demos and internal research, not production clinical deployment.
 
 ---
 
 ## Concrete roadmap
-
-### v0.5: data and deployment hardening
-
-- Add DICOM ingestion with metadata redaction.
-- Add batch inference API with FastAPI.
-- Add Dockerfile and cloud deployment template.
-- Add audit logging for research studies.
-- Add basic authentication for hosted demos.
 
 ### v0.6: research-grade evaluation
 
@@ -247,6 +304,14 @@ docs/
 - Compare multiple TorchXRayVision backbones and ensemble strategies.
 - Add subgroup evaluation for scanner/site/domain shift when metadata is available.
 - Add uncertainty methods such as test-time augmentation and ensemble variance.
+- Add dataset cards and model cards for each benchmark run.
+
+### v0.7: clinical workflow prototype
+
+- Add case queue, reviewer notes, and human-in-the-loop feedback capture.
+- Add report comparison against radiology text labels where available.
+- Add monitoring dashboard for drift, calibration, and alert volume.
+- Add stronger deployment security boundaries and signed audit manifests.
 
 ---
 
