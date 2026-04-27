@@ -36,6 +36,7 @@ def require_api_key(x_api_key: Optional[str] = Header(default=None)) -> None:
 def _write_upload(upload: UploadFile, directory: Path) -> Path:
     suffix = Path(upload.filename or "image.png").suffix or ".png"
     safe_name = f"upload{suffix}"
+    directory.mkdir(parents=True, exist_ok=True)
     out = directory / safe_name
     with out.open("wb") as handle:
         handle.write(upload.file.read())
@@ -85,9 +86,7 @@ def batch_predict_endpoint(
     with tempfile.TemporaryDirectory(prefix="xraymind_batch_") as tmp:
         tmpdir = Path(tmp)
         for idx, file in enumerate(files):
-            image_path = _write_upload(file, tmpdir / f"case_{idx}") if False else None
             case_dir = tmpdir / f"case_{idx}"
-            case_dir.mkdir(parents=True, exist_ok=True)
             image_path = _write_upload(file, case_dir)
             try:
                 prediction = predict_image(image_path, model_name=model, top_k=top_k, threshold=threshold)
