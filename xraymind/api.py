@@ -543,6 +543,17 @@ def list_jobs_endpoint(
     return {"jobs": jobs, "count": len(jobs)}
 
 
+@app.post("/jobs/process-next", response_model=HostedJobEnvelope)
+def process_next_job_endpoint(_: ApiPrincipal = Depends(require_admin)) -> dict:
+    """Process the oldest queued hosted job synchronously.
+
+    Production deployments can call this from a worker process or scheduler. The
+    endpoint is intentionally admin-only because it executes model inference.
+    """
+
+    return {"job": process_next_job(db_path=_db_path())}
+
+
 @app.get("/jobs/{job_id}", response_model=HostedJobEnvelope)
 def get_job_endpoint(job_id: int, principal: ApiPrincipal = Depends(require_api_key)) -> dict:
     """Return one hosted job if the caller can access its tenant."""
@@ -569,14 +580,3 @@ def cancel_job_endpoint(job_id: int, principal: ApiPrincipal = Depends(require_r
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"job": cancelled}
-
-
-@app.post("/jobs/process-next", response_model=HostedJobEnvelope)
-def process_next_job_endpoint(_: ApiPrincipal = Depends(require_admin)) -> dict:
-    """Process the oldest queued hosted job synchronously.
-
-    Production deployments can call this from a worker process or scheduler. The
-    endpoint is intentionally admin-only because it executes model inference.
-    """
-
-    return {"job": process_next_job(db_path=_db_path())}
