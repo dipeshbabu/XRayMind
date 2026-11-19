@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 
-import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 import numpy as np
 
 
@@ -36,17 +36,17 @@ def save_reliability_diagram(
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    fig = plt.figure(figsize=(5, 5))
-    plt.plot([0, 1], [0, 1], linestyle="--", label="Perfect calibration")
+    fig = Figure(figsize=(5, 5))
+    ax = fig.subplots()
+    ax.plot([0, 1], [0, 1], linestyle="--", label="Perfect calibration")
     if centers:
-        plt.plot(centers, accuracies, marker="o", label="Model")
-    plt.xlabel("Mean predicted probability")
-    plt.ylabel("Observed frequency")
-    plt.title(title)
-    plt.xlim(0, 1)
-    plt.ylim(0, 1)
-    plt.legend()
-    plt.tight_layout()
+        ax.plot(centers, accuracies, marker="o", label="Model")
+    ax.set_xlabel("Mean predicted probability")
+    ax.set_ylabel("Observed frequency")
+    ax.set_title(title)
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.legend()
+    fig.tight_layout()
     fig.savefig(path, dpi=160)
-    plt.close(fig)
     return path

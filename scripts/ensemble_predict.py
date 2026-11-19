@@ -16,7 +16,7 @@ import argparse
 import json
 from pathlib import Path
 
-import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 import pandas as pd
 
 from xraymind.ensemble import (
@@ -63,16 +63,16 @@ def save_selective_curve_plot(summary_df: pd.DataFrame, out_path: Path) -> Path 
     if summary_df.empty:
         return None
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig = plt.figure(figsize=(6, 4))
-    plt.plot(summary_df["coverage"], summary_df["mean_selective_risk"], marker="o")
-    plt.xlabel("Coverage: fraction of cases automatically predicted")
-    plt.ylabel("Selective risk: 1 - accuracy")
-    plt.title("Ensemble selective risk curve")
-    plt.xlim(0, 1.05)
-    plt.ylim(bottom=0)
-    plt.tight_layout()
+    fig = Figure(figsize=(6, 4))
+    ax = fig.subplots()
+    ax.plot(summary_df["coverage"], summary_df["mean_selective_risk"], marker="o")
+    ax.set_xlabel("Coverage: fraction of cases automatically predicted")
+    ax.set_ylabel("Selective risk: 1 - accuracy")
+    ax.set_title("Ensemble selective risk curve")
+    ax.set_xlim(0, 1.05)
+    ax.set_ylim(bottom=0)
+    fig.tight_layout()
     fig.savefig(out_path, dpi=160)
-    plt.close(fig)
     return out_path
 
 

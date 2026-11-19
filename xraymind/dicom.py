@@ -52,7 +52,7 @@ def _require_pydicom():
         import pydicom
     except Exception as exc:  # pragma: no cover - optional dependency guard
         raise RuntimeError(
-            "DICOM support requires the optional dependency 'pydicom'. Install it with: pip install 'xraymind[dicom]' or pip install pydicom"
+            "DICOM support requires 'pydicom'. Install it with: pip install pydicom"
         ) from exc
     return pydicom
 
@@ -124,8 +124,11 @@ def redact_dicom(
     if remove_private_tags:
         ds.remove_private_tags()
     for tag in PHI_TAGS:
-        if hasattr(ds, tag):
-            setattr(ds, tag, replacement)
+        if not hasattr(ds, tag):
+            continue
+        element = ds.data_element(tag)
+        if element is not None:
+            element.value = "" if element.VR in {"DA", "DT", "TM", "AS", "CS"} else replacement
 
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)

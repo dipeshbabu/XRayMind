@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 import numpy as np
 from captum.attr import IntegratedGradients, InputXGradient, Saliency
 
@@ -53,12 +53,12 @@ def save_heatmap(
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    fig = plt.figure(figsize=(5, 5))
-    plt.imshow(heatmap, cmap=cmap)
-    plt.axis("off")
-    plt.tight_layout(pad=0)
+    fig = Figure(figsize=(5, 5))
+    ax = fig.subplots()
+    ax.imshow(heatmap, cmap=cmap)
+    ax.axis("off")
+    fig.tight_layout(pad=0)
     fig.savefig(path, bbox_inches="tight", pad_inches=0)
-    plt.close(fig)
     return path
 
 
