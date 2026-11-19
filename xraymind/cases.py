@@ -368,41 +368,38 @@ def add_review(
     if review_round is not None and int(review_round) < 1:
         raise ValueError("review_round must be at least 1")
     store = _coerce_store(store, db_path)
-    if get_case(case_id, store=store) is None:
-        raise KeyError(f"Case {case_id} not found")
-    now = utc_now_iso()
-    if review_round is None:
-        prior = store.fetch_one("SELECT COUNT(*) AS count FROM reviews WHERE case_id = ?", (int(case_id),)) or {}
-        review_round = int(prior.get("count", 0) or 0) + 1
-    review_id = store.execute(
-        """
-        INSERT INTO reviews(case_id, reviewer, decision, notes, final_labels, review_round, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        (int(case_id), reviewer, decision, notes, dumps_json(final_labels or {}), int(review_round), now),
-    )
-    needs_second_reader = decision in SECOND_READER_DECISIONS and int(review_round) == 1
-    store.execute(
-        """
-        UPDATE cases
-        SET status = ?, needs_second_reader = ?, updated_at = ?
-        WHERE id = ?
-        """,
-        (_validate_choice(next_status, VALID_CASE_STATUSES, "status"), int(needs_second_reader), utc_now_iso(), int(case_id)),
-    )
-    log_event(case_id, "case.status_updated", {"status": next_status}, store=store)
-    log_event(
-        case_id,
-        "review.created",
-        {
-            "review_id": review_id,
-            "decision": decision,
-            "review_round": int(review_round),
-            "needs_second_reader": needs_second_reader,
-        },
-        store=store,
-    )
-    row = store.fetch_one("SELECT * FROM reviews WHERE id = ?", (review_id,))
+    with store.connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        if conn.execute("SELECT id FROM cases WHERE id = ?", (int(case_id),)).fetchone() is None:
+            raise KeyError(f"Case {case_id} not found")
+        now = utc_now_iso()
+        if review_round is None:
+            prior = conn.execute("SELECT MAX(review_round) AS latest FROM reviews WHERE case_id = ?", (int(case_id),)).fetchone()
+            review_round = int(prior["latest"] or 0) + 1
+        cursor = conn.execute(
+            """
+            INSERT INTO reviews(case_id, reviewer, decision, notes, final_labels, review_round, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (int(case_id), reviewer, decision, notes, dumps_json(final_labels or {}), int(review_round), now),
+        )
+        review_id = int(cursor.lastrowid)
+        needs_second_reader = decision in SECOND_READER_DECISIONS and int(review_round) == 1
+        conn.execute(
+            "UPDATE cases SET status = ?, needs_second_reader = ?, updated_at = ? WHERE id = ?",
+            (next_status, int(needs_second_reader), now, int(case_id)),
+        )
+        events = [
+            ("case.status_updated", {"status": next_status}),
+            ("review.created", {"review_id": review_id, "decision": decision,
+                                "review_round": int(review_round), "needs_second_reader": needs_second_reader}),
+        ]
+        for event_type, payload in events:
+            conn.execute(
+                "INSERT INTO audit_events(case_id, event_type, payload, created_at) VALUES (?, ?, ?, ?)",
+                (int(case_id), event_type, dumps_json(payload), now),
+            )
+        row = conn.execute("SELECT * FROM reviews WHERE id = ?", (review_id,)).fetchone()
     assert row is not None
     return _hydrate_review(row)
 

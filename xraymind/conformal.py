@@ -26,12 +26,16 @@ def binary_nonconformity_scores(y_true: Sequence[int], y_score: Sequence[float])
     observed class.
     """
 
-    y = np.asarray(y_true, dtype=int)
-    p = np.clip(np.asarray(y_score, dtype=float), 0.0, 1.0)
+    y = np.asarray(y_true, dtype=float)
+    p = np.asarray(y_score, dtype=float)
+    if y.ndim != 1 or p.ndim != 1:
+        raise ValueError("y_true and y_score must be one-dimensional")
     if len(y) != len(p):
         raise ValueError("y_true and y_score must have the same length")
     if not np.isin(y, [0, 1]).all():
         raise ValueError("binary conformal prediction expects labels encoded as 0/1")
+    if not np.isfinite(p).all() or np.any((p < 0) | (p > 1)):
+        raise ValueError("probabilities must be finite values between 0 and 1")
     return np.where(y == 1, 1.0 - p, p)
 
 
@@ -77,7 +81,7 @@ def calibrate_conformal_thresholds(
         valid = merged[[true_col, pred_col]].dropna()
         if valid.empty:
             continue
-        y_true = valid[true_col].astype(int).to_numpy()
+        y_true = valid[true_col].to_numpy()
         y_score = valid[pred_col].astype(float).to_numpy()
         scores = binary_nonconformity_scores(y_true, y_score)
         rows.append(

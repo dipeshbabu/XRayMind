@@ -110,8 +110,8 @@ def current_principal(principal: ApiPrincipal = Depends(require_api_key)) -> Api
 def predict_endpoint(
     file: UploadFile = File(...),
     model: str = Form(DEFAULT_MODEL_NAME),
-    top_k: int = Form(DEFAULT_TOP_K),
-    threshold: float = Form(0.5),
+    top_k: int = Form(DEFAULT_TOP_K, ge=1),
+    threshold: float = Form(0.5, ge=0.0, le=1.0),
     audit_log: str = Form("outputs/audit/api.jsonl"),
     _: ApiPrincipal = Depends(require_api_key),
 ) -> JSONResponse:
@@ -128,8 +128,8 @@ def predict_endpoint(
 def batch_predict_endpoint(
     files: List[UploadFile] = File(...),
     model: str = Form(DEFAULT_MODEL_NAME),
-    top_k: int = Form(DEFAULT_TOP_K),
-    threshold: float = Form(0.5),
+    top_k: int = Form(DEFAULT_TOP_K, ge=1),
+    threshold: float = Form(0.5, ge=0.0, le=1.0),
     audit_log: str = Form("outputs/audit/api.jsonl"),
     _: ApiPrincipal = Depends(require_api_key),
 ) -> JSONResponse:
@@ -155,8 +155,8 @@ def batch_predict_endpoint(
 def packet_endpoint(
     file: UploadFile = File(...),
     model: str = Form(DEFAULT_MODEL_NAME),
-    top_k: int = Form(DEFAULT_TOP_K),
-    threshold: float = Form(0.5),
+    top_k: int = Form(DEFAULT_TOP_K, ge=1),
+    threshold: float = Form(0.5, ge=0.0, le=1.0),
     label: Optional[str] = Form(default=None),
     make_pdf: bool = Form(False),
     audit_log: str = Form("outputs/audit/api.jsonl"),
@@ -187,8 +187,8 @@ def packet_endpoint(
 def create_case_endpoint(
     file: UploadFile = File(...),
     model: str = Form(DEFAULT_MODEL_NAME),
-    top_k: int = Form(DEFAULT_TOP_K),
-    threshold: float = Form(0.5),
+    top_k: int = Form(DEFAULT_TOP_K, ge=1),
+    threshold: float = Form(0.5, ge=0.0, le=1.0),
     image_id: Optional[str] = Form(default=None),
     priority: str = Form("routine"),
     tags: str = Form(""),
@@ -227,8 +227,8 @@ def list_cases_endpoint(
     priority: Optional[str] = None,
     assigned_to: Optional[str] = None,
     needs_second_reader: Optional[bool] = None,
-    limit: int = 50,
-    offset: int = 0,
+    limit: int = Query(50, ge=0),
+    offset: int = Query(0, ge=0),
     _: ApiPrincipal = Depends(require_api_key),
 ) -> dict:
     """List persisted review cases."""
@@ -395,7 +395,7 @@ def dashboard_summary_endpoint(_: ApiPrincipal = Depends(require_api_key)) -> JS
 
 @app.get("/dashboard/attention")
 def dashboard_attention_endpoint(
-    limit: int = 25,
+    limit: int = Query(25, ge=0),
     _: ApiPrincipal = Depends(require_api_key),
 ) -> JSONResponse:
     """Return cases that need human attention."""
@@ -409,8 +409,8 @@ def export_cases_endpoint(
     out_dir: str = Form("outputs/exports"),
     status: Optional[str] = Form(default=None),
     priority: Optional[str] = Form(default=None),
-    limit: int = Form(10_000),
-    offset: int = Form(0),
+    limit: int = Form(10_000, ge=0),
+    offset: int = Form(0, ge=0),
     _: ApiPrincipal = Depends(require_admin),
 ) -> JSONResponse:
     """Export case workflow data to JSONL/CSV and return the manifest."""
@@ -431,7 +431,7 @@ def export_cases_endpoint(
 
 @app.get("/monitoring/snapshot")
 def monitoring_snapshot_endpoint(
-    limit: int = 10_000,
+    limit: int = Query(10_000, ge=0),
     subgroup_min_cases: int = 1,
     _: ApiPrincipal = Depends(require_api_key),
 ) -> JSONResponse:
@@ -442,7 +442,7 @@ def monitoring_snapshot_endpoint(
 
 @app.get("/monitoring/report.md", response_class=PlainTextResponse)
 def monitoring_markdown_report_endpoint(
-    limit: int = 10_000,
+    limit: int = Query(10_000, ge=0),
     subgroup_min_cases: int = 1,
     _: ApiPrincipal = Depends(require_api_key),
 ) -> str:
@@ -457,7 +457,7 @@ def save_monitoring_snapshot_endpoint(
     out: str = Form("outputs/monitoring/snapshot.json"),
     markdown_out: Optional[str] = Form(default=None),
     baseline: Optional[str] = Form(default=None),
-    limit: int = Form(10_000),
+    limit: int = Form(10_000, ge=0),
     drift_threshold: float = Form(0.15),
     subgroup_min_cases: int = Form(1),
     _: ApiPrincipal = Depends(require_admin),
@@ -480,8 +480,8 @@ def save_monitoring_snapshot_endpoint(
 def enqueue_case_prediction_job_endpoint(
     file: UploadFile = File(...),
     model: str = Form(DEFAULT_MODEL_NAME),
-    top_k: int = Form(DEFAULT_TOP_K),
-    threshold: float = Form(0.5),
+    top_k: int = Form(DEFAULT_TOP_K, ge=1),
+    threshold: float = Form(0.5, ge=0.0, le=1.0),
     image_id: Optional[str] = Form(default=None),
     priority: str = Form("routine"),
     tags: str = Form(""),
@@ -521,8 +521,8 @@ def enqueue_case_prediction_job_endpoint(
 def list_jobs_endpoint(
     tenant_id: Optional[str] = None,
     status: Optional[str] = None,
-    limit: int = 50,
-    offset: int = 0,
+    limit: int = Query(50, ge=0),
+    offset: int = Query(0, ge=0),
     principal: ApiPrincipal = Depends(require_api_key),
 ) -> dict:
     """List hosted async jobs. Non-admin callers only see their own tenant."""
