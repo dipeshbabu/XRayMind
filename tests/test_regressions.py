@@ -143,7 +143,12 @@ def test_empty_role_key_configuration_is_rejected(config):
 
 def test_threshold_tuning_aligns_images(tmp_path, monkeypatch):
     from argparse import Namespace
-    from scripts import tune_thresholds
+    from importlib.util import module_from_spec, spec_from_file_location
+
+    script_path = Path(__file__).resolve().parents[1] / 'scripts' / 'tune_thresholds.py'
+    spec = spec_from_file_location('tune_thresholds', script_path)
+    tune_thresholds = module_from_spec(spec)
+    spec.loader.exec_module(tune_thresholds)
 
     labels = tmp_path / 'labels.csv'
     predictions = tmp_path / 'predictions.csv'
