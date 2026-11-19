@@ -38,8 +38,8 @@ def binary_nonconformity_scores(y_true: Sequence[int], y_score: Sequence[float])
 def conformal_quantile(scores: Sequence[float], alpha: float = 0.1) -> float:
     """Compute the finite-sample split-conformal threshold.
 
-    Uses the standard ceil((n + 1) * (1 - alpha)) / n order statistic with a
-    conservative cap at the largest calibration score.
+    Uses the ceil((n + 1) * (1 - alpha)) order statistic, with infinity when
+    the requested rank exceeds the calibration sample size.
     """
 
     if not 0.0 < alpha < 1.0:
@@ -50,8 +50,9 @@ def conformal_quantile(scores: Sequence[float], alpha: float = 0.1) -> float:
         raise ValueError("scores must contain at least one finite value")
     sorted_scores = np.sort(arr)
     rank = int(math.ceil((len(sorted_scores) + 1) * (1.0 - alpha)))
-    index = min(max(rank - 1, 0), len(sorted_scores) - 1)
-    return float(sorted_scores[index])
+    if rank > len(sorted_scores):
+        return float("inf")
+    return float(sorted_scores[rank - 1])
 
 
 def calibrate_conformal_thresholds(
@@ -67,6 +68,8 @@ def calibrate_conformal_thresholds(
     label_names = list(labels or [c for c in labels_df.columns if c != image_column and c in pred_df.columns])
     rows: List[Dict[str, Any]] = []
     for label in label_names:
+        if label not in labels_df.columns or label not in pred_df.columns:
+            continue
         true_col = f"{label}_true" if f"{label}_true" in merged.columns else label
         pred_col = f"{label}_pred" if f"{label}_pred" in merged.columns else label
         if true_col not in merged.columns or pred_col not in merged.columns:
@@ -187,6 +190,8 @@ def split_calibration_eval(
 
     if not 0.0 < calibration_fraction < 1.0:
         raise ValueError("calibration_fraction must be between 0 and 1")
+    if len(df) < 2:
+        raise ValueError("At least two rows are required for calibration and evaluation")
     rng = np.random.default_rng(seed)
     indices = np.arange(len(df))
     rng.shuffle(indices)

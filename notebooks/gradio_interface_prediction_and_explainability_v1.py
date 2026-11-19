@@ -23,18 +23,19 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import sys
 import os
+import subprocess
 
-os.system("pip install torchxrayvision captum gradio")
-os.system("git clone https://github.com/mlmed/gifsplanation")
+subprocess.check_call([sys.executable, "-m", "pip", "install", "torchxrayvision", "captum", "gradio"])
+if not Path('gifsplanation').is_dir():
+    subprocess.check_call(['git', 'clone', 'https://github.com/mlmed/gifsplanation'])
 
 sys.path.insert(0, "./gifsplanation/")
 
 from captum.attr import IntegratedGradients, Saliency, InputXGradient
 import attribution
 
-os.system(
-    "wget https://raw.githubusercontent.com/mlmed/torchxrayvision/master/tests/16747_3_1.jpg"
-)  # download test image
+from urllib.request import urlretrieve
+urlretrieve('https://raw.githubusercontent.com/mlmed/torchxrayvision/master/tests/16747_3_1.jpg', '16747_3_1.jpg')
 
 
 def make_fig(plot_matrix):
@@ -54,7 +55,7 @@ def xrv_prepare_image(image):
     img = xrv.datasets.normalize(
         image, 255
     )  # convert 8-bit image to [-1024, 1024] range
-    img = img.mean(2)[None, ...]  # Make single color channel
+    img = img.mean(2)[None, ...] if img.ndim > 2 else img[None, ...]  # Make single color channel
     transform = torchvision.transforms.Compose(
         [xrv.datasets.XRayCenterCrop(), xrv.datasets.XRayResizer(224)]
     )
@@ -72,7 +73,7 @@ def predict(image, model_choice):
 
     outputs = model(img)
     scores = (
-        outputs[0].detach().numpy().astype(np.float)
+        outputs[0].detach().numpy().astype(float)
     )  # conversion to np.float is needed for visualization with gr.Label
     label = dict(zip(model.pathologies, scores))
     return label
@@ -82,6 +83,7 @@ def explain_gradient(image, model_choice, target):
     """Function that serves explanations."""
 
     model = xrv.models.DenseNet(weights=model_choice)
+    model.eval()
     input = xrv_prepare_image(image)
 
     # Saliency
@@ -96,6 +98,7 @@ def explain_input_x_gradient(image, model_choice, target):
     """Function that serves explanations."""
 
     model = xrv.models.DenseNet(weights=model_choice)
+    model.eval()
     input = xrv_prepare_image(image)
 
     # InputXGradient
@@ -109,6 +112,7 @@ def explain_integrated_gradients(image, model_choice, target):
     """Function that serves explanations."""
 
     model = xrv.models.DenseNet(weights=model_choice)
+    model.eval()
     input = xrv_prepare_image(image)
 
     # IntegratedGradients
@@ -122,6 +126,7 @@ def explain_gifsplanation(image, model_choice, target):
     """Function that serves explanations."""
 
     model = xrv.models.DenseNet(weights=model_choice)
+    model.eval()
     input = xrv_prepare_image(image)
 
     # Gifsplanation
@@ -190,7 +195,7 @@ with frontend:
         with gr.Row():
             with gr.Column():
                 input_image = gr.Image(label="X-ray image")
-                select_model = gr.Dropdown(label="Select model", choices=model_choices)
+                select_model = gr.Dropdown(label="Select model", choices=model_choices, value=model_choices[0])
                 with gr.Row():
                     submit_button = gr.Button("Submit")
                 gr.Examples(["16747_3_1.jpg"], inputs=input_image)
@@ -247,5 +252,3 @@ with frontend:
     )
 
 frontend.launch(share=True, show_error=True)
-
-frontend.close()

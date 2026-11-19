@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, List, Optional
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 
 from .api_auth import ApiPrincipal, auth_mode, require_admin, require_api_key, require_reviewer
@@ -72,14 +72,9 @@ def _write_upload(upload: UploadFile, directory: Path) -> Path:
 
 def _persist_upload(upload: UploadFile, case_id_hint: str | None = None) -> Path:
     suffix = Path(upload.filename or "image.png").suffix or ".png"
-    stem = Path(upload.filename or "case").stem.replace(" ", "_")[:80] or "case"
-    name = f"{case_id_hint + '_' if case_id_hint else ''}{stem}{suffix}"
-    out = _case_upload_dir() / name
-    counter = 1
-    while out.exists():
-        out = _case_upload_dir() / f"{stem}_{counter}{suffix}"
-        counter += 1
-    with out.open("wb") as handle:
+    descriptor, name = tempfile.mkstemp(prefix=f"{case_id_hint or 'case'}_", suffix=suffix, dir=_case_upload_dir())
+    out = Path(name)
+    with os.fdopen(descriptor, "wb") as handle:
         shutil.copyfileobj(upload.file, handle)
     return out
 
@@ -173,7 +168,7 @@ def packet_endpoint(
     output_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="xraymind_packet_upload_") as tmp:
         image_path = _write_upload(file, Path(tmp))
-        case_dir = output_root / Path(file.filename or "case").stem
+        case_dir = Path(tempfile.mkdtemp(prefix="packet_", dir=output_root))
         manifest = create_study_packet(
             image=image_path,
             output_dir=case_dir,
@@ -332,6 +327,8 @@ def review_case_endpoint(
         )
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=400, detail="final_labels_json must be valid JSON") from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return JSONResponse({"review": review, "case_detail": get_case_detail(case_id, db_path=_db_path())})
@@ -340,7 +337,7 @@ def review_case_endpoint(
 @app.get("/reviewer/queue", response_model=ReviewerQueueResponse)
 def reviewer_queue_endpoint(
     reviewer: Optional[str] = None,
-    limit: int = 25,
+    limit: int = Query(25, ge=1),
     include_unassigned: bool = True,
     principal: ApiPrincipal = Depends(require_reviewer),
 ) -> dict:
@@ -348,14 +345,9 @@ def reviewer_queue_endpoint(
 
     requested_reviewer = reviewer or principal.key_id
     store = SQLiteStore(_db_path())
-    attention_cases = cases_requiring_attention(store=store, limit=max(limit * 3, limit))
-    queue = []
-    for item in attention_cases:
-        assigned_to = item.get("assigned_to")
-        if assigned_to == requested_reviewer or (include_unassigned and not assigned_to):
-            queue.append(item)
-        if len(queue) >= limit:
-            break
+    queue = cases_requiring_attention(
+        store=store, limit=limit, reviewer=requested_reviewer, include_unassigned=include_unassigned,
+    )
     return {"cases": queue, "count": len(queue)}
 
 

@@ -78,7 +78,7 @@ def dashboard_summary(*, store: SQLiteStore | None = None, db_path: str | Path =
     }
 
 
-def cases_requiring_attention(*, store: SQLiteStore | None = None, db_path: str | Path = DEFAULT_DB_PATH, limit: int = 25) -> list[dict[str, Any]]:
+def cases_requiring_attention(*, store: SQLiteStore | None = None, db_path: str | Path = DEFAULT_DB_PATH, limit: int = 25, reviewer: str | None = None, include_unassigned: bool = True) -> list[dict[str, Any]]:
     """Return cases that should be prioritized for human review."""
 
     store = _coerce_store(store, db_path)
@@ -96,9 +96,11 @@ def cases_requiring_attention(*, store: SQLiteStore | None = None, db_path: str 
             ORDER BY p2.created_at DESC, p2.id DESC
             LIMIT 1
         )
-        WHERE cases.status IN ('pending', 'deferred', 'flagged')
+        WHERE cases.status != 'archived'
+          AND (cases.status IN ('pending', 'deferred', 'flagged')
            OR predictions.low_confidence = 1
-           OR cases.needs_second_reader = 1
+           OR cases.needs_second_reader = 1)
+          AND (? IS NULL OR cases.assigned_to = ? OR (? = 1 AND (cases.assigned_to IS NULL OR cases.assigned_to = '')))
         ORDER BY
             CASE cases.needs_second_reader WHEN 1 THEN 0 ELSE 1 END,
             CASE cases.priority WHEN 'urgent' THEN 0 WHEN 'elevated' THEN 1 ELSE 2 END,
@@ -106,7 +108,7 @@ def cases_requiring_attention(*, store: SQLiteStore | None = None, db_path: str 
             cases.created_at DESC
         LIMIT ?
         """,
-        (int(limit),),
+        (reviewer, reviewer, int(include_unassigned), int(limit)),
     )
     hydrated: list[dict[str, Any]] = []
     for row in rows:

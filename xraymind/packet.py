@@ -81,10 +81,8 @@ def create_study_packet(
         },
     }
     manifest_path = out_dir / "manifest.json"
-    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     manifest["files"]["manifest"] = str(manifest_path)
-
-    archive_path = shutil.make_archive(str(out_dir), "zip", root_dir=out_dir)
-    manifest["files"]["zip"] = archive_path
+    manifest["files"]["zip"] = str(out_dir) + ".zip"
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    shutil.make_archive(str(out_dir), "zip", root_dir=out_dir)
     return manifest

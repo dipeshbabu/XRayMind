@@ -24,13 +24,15 @@ def main() -> int:
     args = parse_args()
     labels_df = pd.read_csv(args.labels)
     pred_df = pd.read_csv(args.predictions)
+    merged = labels_df.merge(pred_df, on=args.image_column, suffixes=("_true", "_pred"), validate="one_to_one")
 
     rows = []
     for label in [c for c in labels_df.columns if c != args.image_column]:
         if label not in pred_df.columns:
             continue
-        y_true = labels_df[label].astype(int).to_numpy()
-        y_score = pred_df[label].astype(float).to_numpy()
+        valid = merged[[f"{label}_true", f"{label}_pred"]].dropna()
+        y_true = valid[f"{label}_true"].astype(int).to_numpy()
+        y_score = valid[f"{label}_pred"].astype(float).to_numpy()
         if len(set(y_true.tolist())) < 2:
             continue
         rows.append(

@@ -174,11 +174,17 @@ def process_next_job(*, store: SQLiteStore | None = None, db_path: str | Path = 
     """Process the oldest queued job synchronously and return the final job."""
 
     store = _coerce_store(store, db_path)
-    row = store.fetch_one("SELECT * FROM hosted_jobs WHERE status = 'queued' ORDER BY created_at ASC, id ASC LIMIT 1")
-    job = _hydrate_job(row)
-    if job is None:
-        return None
-    _set_job_status(job["id"], "running", store=store)
+    with store.connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT * FROM hosted_jobs WHERE status = 'queued' ORDER BY created_at ASC, id ASC LIMIT 1").fetchone()
+        job = _hydrate_job(row)
+        if job is None:
+            return None
+        now = utc_now_iso()
+        conn.execute(
+            "UPDATE hosted_jobs SET status = 'running', started_at = ?, updated_at = ?, attempts = attempts + 1 WHERE id = ?",
+            (now, now, job["id"]),
+        )
     try:
         result = _run_job(job, store=store)
     except Exception as exc:
@@ -195,12 +201,18 @@ def cancel_job(job_id: int, *, store: SQLiteStore | None = None, db_path: str | 
     """Cancel a queued job before a worker starts it."""
 
     store = _coerce_store(store, db_path)
-    job = get_job(job_id, store=store)
-    if job is None:
-        raise KeyError(f"Job {job_id} not found")
-    if job["status"] != "queued":
-        raise ValueError("Only queued jobs can be cancelled")
-    cancelled = _set_job_status(job_id, "cancelled", store=store)
+    with store.connect() as conn:
+        now = utc_now_iso()
+        updated = conn.execute(
+            "UPDATE hosted_jobs SET status = 'cancelled', updated_at = ?, completed_at = ? WHERE id = ? AND status = 'queued'",
+            (now, now, int(job_id)),
+        )
+        if updated.rowcount == 0:
+            if conn.execute("SELECT id FROM hosted_jobs WHERE id = ?", (int(job_id),)).fetchone() is None:
+                raise KeyError(f"Job {job_id} not found")
+            raise ValueError("Only queued jobs can be cancelled")
+    cancelled = get_job(job_id, store=store)
+    assert cancelled is not None
     log_event(None, "job.cancelled", {"job_id": job_id}, store=store)
     return cancelled
 

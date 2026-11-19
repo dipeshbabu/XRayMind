@@ -1,51 +1,15 @@
 # XRayMind
 
-XRayMind is an explainable chest X-ray research prototype built around TorchXRayVision models, Captum attribution methods, reliability evaluation, reporting, DICOM ingestion, hosted API inference, uncertainty, model cards, dataset cards, selective prediction, ensemble disagreement, conformal prediction sets, local case review workflows, exportable review datasets, operational monitoring snapshots, assignment queues, second-reader review, role-aware API access, reviewer queues, and a lightweight Gradio interface. The project is intended for AI/ML research demos, model inspection, benchmarking, and educational exploration of chest radiography classifiers.
+Explore, explain, and evaluate chest X-ray classifiers from the command line, a hosted API, or a Gradio interface.
+
+XRayMind is a research prototype built with TorchXRayVision models and Captum attribution methods. Use it for AI/ML demos, model inspection, benchmarking, and education.
+
+- Run predictions on images and DICOM files, inspect attributions, and generate reports.
+- Evaluate reliability, uncertainty, selective prediction, ensemble disagreement, and conformal prediction sets; create model and dataset cards.
+- Manage local case reviews, assignments, second reads, and reviewer queues with role-aware API access.
+- Export review datasets and track workflow monitoring snapshots.
 
 > **Important:** XRayMind is not a medical device and is not for clinical diagnosis, treatment, or triage. Outputs must be reviewed by qualified clinical professionals.
-
----
-
-## What is new in v1.3
-
-- Role-aware API-key authentication with `viewer`, `reviewer`, and `admin` roles.
-- Backward-compatible single-key API mode using `XRAYMIND_API_KEY`.
-- Stable Pydantic response schemas for health, identity, case list, case detail, case assignment, and reviewer queue responses.
-- Reviewer queue endpoints for claim/release workflows: `GET /reviewer/queue`, `POST /reviewer/claim`, and `POST /reviewer/release`.
-- Admin-only protection for exports and persisted monitoring snapshots.
-- API auth tests for role-key, legacy-key, dev-open, and invalid-key modes.
-
-## What is new in v1.2
-
-- Assignment fields for review cases: `assigned_to`, `due_at`, and `needs_second_reader`.
-- Idempotent SQLite schema migrations so existing local workflow databases are upgraded safely.
-- Second-reader logic: uncertain, disagree, defer, and flag first-round reviews automatically mark the case for another read.
-- New CLI command: `xraymind case assign`.
-- New API route: `POST /cases/{case_id}/assign`.
-- Case list filters for `assigned_to` and `needs_second_reader`.
-- Dashboard metrics for assignment load, unassigned cases, and second-reader cases.
-- Case exports now include assignment and second-reader columns.
-
-## What is new in v1.1
-
-- Case export utilities in `xraymind/export.py` for JSONL/CSV review datasets.
-- Export manifests with file paths, row counts, filters, SHA-256 checksums, and responsible-use disclaimer.
-- Monitoring snapshots in `xraymind/monitoring.py` for review rate, low-confidence rate, disagreement rate, flagged/deferred/urgent rates, status counts, decision counts, and top alert labels.
-- Simple drift comparison against a previous monitoring snapshot.
-- Standalone scripts: `scripts/export_cases.py` and `scripts/monitor_cases.py`.
-- Tests for export integrity, reviewer disagreement analytics, and drift alerts.
-
-## What is new in v1.0
-
-- Local SQLite case workflow in `xraymind/store.py` and `xraymind/cases.py`.
-- Case queue records with image path, model, priority, status, tags, predictions, reviews, and timestamps.
-- Human review capture with decisions, reviewer notes, final labels, and audit events.
-- Dashboard summaries in `xraymind/dashboard.py` for status counts, priorities, low-confidence cases, review decisions, and top alert labels.
-- CLI workflow commands: `xraymind case create/list/show/status/review` and `xraymind dashboard`.
-- Runnable local demo script: `scripts/case_workflow_demo.py`.
-- Dedicated workflow guide in `docs/V1_0_CASE_WORKFLOW.md`.
-
----
 
 ## Installation
 
@@ -53,7 +17,7 @@ XRayMind is an explainable chest X-ray research prototype built around TorchXRay
 git clone https://github.com/dipeshbabu/XRayMind.git
 cd XRayMind
 python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -e .
 ```
 
@@ -71,23 +35,19 @@ pip install -e ".[pdf]"
 
 For GPU use, install the PyTorch build that matches your CUDA setup before installing the package.
 
----
-
-## Quickstart
-
-### Launch the demo
+## Launch the demo
 
 ```bash
 python app.py
 ```
 
-or:
+Or use the CLI:
 
 ```bash
 xraymind demo
 ```
 
-### Run prediction on one image
+## Predict an image
 
 ```bash
 xraymind predict \
@@ -105,7 +65,9 @@ xraymind predict \
   --out outputs/prediction.json
 ```
 
-### Create a local review case
+## Review cases
+
+Create a local review case:
 
 ```bash
 xraymind case create \
@@ -141,13 +103,17 @@ xraymind dashboard
 xraymind dashboard --attention --limit 20
 ```
 
-Export the review dataset:
+## Export review datasets
+
+Export cases as JSONL/CSV:
 
 ```bash
 python scripts/export_cases.py \
   --db outputs/xraymind_cases.sqlite3 \
   --out-dir outputs/exports
 ```
+
+## Monitor reviews
 
 Create a monitoring snapshot:
 
@@ -166,25 +132,23 @@ python scripts/monitor_cases.py \
   --out outputs/monitoring/current.json
 ```
 
-See `docs/V1_0_CASE_WORKFLOW.md` for the complete local and FastAPI workflow.
+See [the case workflow guide](docs/V1_0_CASE_WORKFLOW.md) for the complete local and FastAPI workflow.
 
----
+## Run the API
 
-## Hosted API workflow
-
-Start the API in local dev mode:
+Start the API in local development mode:
 
 ```bash
 uvicorn xraymind.api:app --reload
 ```
 
-For a hosted demo, configure either a single legacy key:
+For a hosted demo, configure a single legacy key:
 
 ```bash
 export XRAYMIND_API_KEY="replace-with-a-long-random-token"
 ```
 
-or role-aware keys:
+Or configure role-aware keys:
 
 ```bash
 export XRAYMIND_API_KEYS="ops=admin:admin-token,reader=reviewer:review-token,audit=viewer:view-token"
@@ -192,7 +156,7 @@ export XRAYMIND_API_KEYS="ops=admin:admin-token,reader=reviewer:review-token,aud
 
 Roles are ordered as `viewer < reviewer < admin`. Viewers can read cases and dashboards, reviewers can create/review/claim cases, and admins can also export cases and save monitoring snapshots.
 
-Check auth and health:
+Check authentication and health:
 
 ```bash
 curl http://localhost:8000/health
@@ -245,14 +209,14 @@ curl -X POST http://localhost:8000/cases/1/review \
   -F "notes=Needs second read"
 ```
 
-View dashboard:
+View the dashboard:
 
 ```bash
 curl -H "X-API-Key: view-token" http://localhost:8000/dashboard/summary
 curl -H "X-API-Key: view-token" "http://localhost:8000/dashboard/attention?limit=20"
 ```
 
-Run admin-only exports and monitoring snapshot persistence:
+Export cases and save monitoring snapshots with an admin key:
 
 ```bash
 curl -X POST http://localhost:8000/exports/cases \
@@ -265,9 +229,9 @@ curl -X POST http://localhost:8000/monitoring/snapshot \
   -F "markdown_out=outputs/monitoring/current.md"
 ```
 
----
+## Evaluate models
 
-## Evaluate on a labeled folder
+Evaluate a labeled image folder or run a multi-model research benchmark.
 
 Expected CSV format:
 
@@ -300,9 +264,10 @@ python scripts/benchmark_models.py \
   --max-risk 0.15
 ```
 
----
-
 ## Project structure
+
+<details>
+<summary>Source files, scripts, and workflow guides</summary>
 
 ```text
 xraymind/
@@ -349,7 +314,8 @@ scripts/
   selective_prediction.py   # selective prediction / abstention artifact generator
   tta_predict.py            # single-image TTA uncertainty wrapper
 src/
-  legacy Gradio and ensemble code from the original prototype
+  image_utils.py           # image helpers used by the thresholding notebook
+  examples/                # sample NIH chest X-rays and source attribution
 app.py                   # modern Gradio demo
 docs/
   api.md                         # hosted API, DICOM, Docker, and audit workflow
@@ -362,9 +328,9 @@ docs/
   V1_0_CASE_WORKFLOW.md          # local case workflow and dashboard guide
 ```
 
----
+</details>
 
-## Current limitations
+## Limitations
 
 - Predictions rely on pretrained TorchXRayVision models and should not be interpreted as clinically validated outputs for a new deployment setting.
 - Thresholds tuned on one dataset should not be reused on another dataset without validation.
@@ -372,16 +338,14 @@ docs/
 - Evaluation currently assumes image-level binary labels, not radiologist-validated localization masks.
 - Subgroup results can be unstable when group sizes are small or labels are imbalanced.
 - TTA standard deviation and ensemble disagreement are rough uncertainty proxies, not calibrated clinical confidence estimates.
-- Selective prediction can now use either probability-margin confidence or ensemble uncertainty, but deferral only improves safety if deferred cases receive qualified review.
+- Selective prediction supports probability-margin confidence or ensemble uncertainty, but deferral only improves safety if deferred cases receive qualified review.
 - Conformal coverage depends on exchangeability between calibration and evaluation data, so distribution shift can break the coverage guarantee.
 - The case workflow, export, and monitoring layers are local research prototypes, not EHR/RIS/PACS integrations.
 - Assignment and second-reader logic are workflow helpers only; they are not clinical triage rules.
 - DICOM redaction is a convenience helper, not a complete HIPAA de-identification pipeline.
 - The hosted API is suitable for demos and internal research, not production clinical deployment.
 
----
-
-## Concrete roadmap
+## Roadmap
 
 ### v1.4: hosted persistence and job processing
 
@@ -399,7 +363,51 @@ docs/
 - Add uncertainty calibration plots and failure-case galleries.
 - Add dataset shift monitoring reports.
 
----
+## Release history
+
+<details>
+<summary>Changes in v1.0–v1.3</summary>
+
+### v1.3
+
+- Role-aware API-key authentication with `viewer`, `reviewer`, and `admin` roles.
+- Backward-compatible single-key API mode using `XRAYMIND_API_KEY`.
+- Stable Pydantic response schemas for health, identity, case list, case detail, case assignment, and reviewer queue responses.
+- Reviewer queue endpoints for claim/release workflows: `GET /reviewer/queue`, `POST /reviewer/claim`, and `POST /reviewer/release`.
+- Admin-only protection for exports and persisted monitoring snapshots.
+- API auth tests for role-key, legacy-key, dev-open, and invalid-key modes.
+
+### v1.2
+
+- Assignment fields for review cases: `assigned_to`, `due_at`, and `needs_second_reader`.
+- Idempotent SQLite schema migrations so existing local workflow databases are upgraded safely.
+- Second-reader logic: uncertain, disagree, defer, and flag first-round reviews automatically mark the case for another read.
+- New CLI command: `xraymind case assign`.
+- New API route: `POST /cases/{case_id}/assign`.
+- Case list filters for `assigned_to` and `needs_second_reader`.
+- Dashboard metrics for assignment load, unassigned cases, and second-reader cases.
+- Case exports now include assignment and second-reader columns.
+
+### v1.1
+
+- Case export utilities in `xraymind/export.py` for JSONL/CSV review datasets.
+- Export manifests with file paths, row counts, filters, SHA-256 checksums, and responsible-use disclaimer.
+- Monitoring snapshots in `xraymind/monitoring.py` for review rate, low-confidence rate, disagreement rate, flagged/deferred/urgent rates, status counts, decision counts, and top alert labels.
+- Simple drift comparison against a previous monitoring snapshot.
+- Standalone scripts: `scripts/export_cases.py` and `scripts/monitor_cases.py`.
+- Tests for export integrity, reviewer disagreement analytics, and drift alerts.
+
+### v1.0
+
+- Local SQLite case workflow in `xraymind/store.py` and `xraymind/cases.py`.
+- Case queue records with image path, model, priority, status, tags, predictions, reviews, and timestamps.
+- Human review capture with decisions, reviewer notes, final labels, and audit events.
+- Dashboard summaries in `xraymind/dashboard.py` for status counts, priorities, low-confidence cases, review decisions, and top alert labels.
+- CLI workflow commands: `xraymind case create/list/show/status/review` and `xraymind dashboard`.
+- Runnable local demo script: `scripts/case_workflow_demo.py`.
+- Dedicated workflow guide in `docs/V1_0_CASE_WORKFLOW.md`.
+
+</details>
 
 ## Responsible use
 

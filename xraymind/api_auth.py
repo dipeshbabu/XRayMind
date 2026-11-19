@@ -41,8 +41,10 @@ def _parse_role_keys(raw: str | None) -> dict[str, ApiPrincipal]:
             continue
         key_id = f"key_{idx + 1}"
         value = item
-        if "=" in item:
-            key_id, value = item.split("=", 1)
+        prefix, separator, secret_value = item.partition(":")
+        if "=" in prefix:
+            key_id, role_value = prefix.split("=", 1)
+            value = role_value + separator + secret_value
             key_id = key_id.strip() or key_id
         if ":" not in value:
             raise ValueError("XRAYMIND_API_KEYS entries must look like role:secret or id=role:secret")
@@ -54,6 +56,8 @@ def _parse_role_keys(raw: str | None) -> dict[str, ApiPrincipal]:
         if not secret:
             raise ValueError("API key secret cannot be empty")
         principals[secret] = ApiPrincipal(key_id=key_id.strip(), role=role)
+    if not principals:
+        raise ValueError("XRAYMIND_API_KEYS must contain at least one API key")
     return principals
 
 

@@ -99,8 +99,8 @@ def main() -> int:
         labels=label_names,
         threshold=args.threshold,
         coverage_grid=args.coverage_grid,
-        confidence_suffix=args.confidence_suffix,
-        uncertainty_suffix=uncertainty_suffix,
+        confidence_suffix=args.confidence_suffix if args.confidence_method == "prediction_confidence_column" else None,
+        uncertainty_suffix=uncertainty_suffix if args.confidence_method == "ensemble_uncertainty" else None,
         uncertainty_weight=args.uncertainty_weight,
     )
     curves_path = out_dir / "selective_curves.csv"

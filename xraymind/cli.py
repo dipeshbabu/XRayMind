@@ -403,7 +403,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "demo":
-        subprocess.run([sys.executable, "app.py"], check=True)
+        subprocess.run([sys.executable, "-m", "app"], check=True)
         return 0
 
     return 1

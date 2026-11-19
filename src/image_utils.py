@@ -19,14 +19,13 @@ def make_fig(plot_matrix):
 def predict(image, model_choice=None, model=None):
     """Function that serves predictions."""
     img = xrv_prepare_image(image)
-    if not model:
+    if model is None:
         model = xrv.models.DenseNet(weights=model_choice)
     model.eval()
 
     outputs = model(img)
 
-    # conversion to np.float is needed for visualization with gr.Label
-    scores = outputs[0].detach().numpy().astype(np.float)
+    scores = outputs[0].detach().cpu().numpy().astype(float)
     label = dict(zip(model.pathologies, scores))
     return label
 
@@ -35,7 +34,7 @@ def xrv_prepare_image(image):
     img = xrv.datasets.normalize(
         image, 255
     )  # convert 8-bit image to [-1024, 1024] range
-    img = img.mean(2)[None, ...]  # Make single color channel
+    img = img.mean(2)[None, ...] if img.ndim > 2 else img[None, ...]
     transform = torchvision.transforms.Compose(
         [xrv.datasets.XRayCenterCrop(), xrv.datasets.XRayResizer(224)]
     )

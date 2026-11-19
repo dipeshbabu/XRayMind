@@ -66,6 +66,8 @@ def evaluate_predictions(
     candidate_labels = list(labels or [c for c in labels_df.columns if c != image_column])
 
     for label in candidate_labels:
+        if label not in labels_df.columns or label not in pred_df.columns:
+            continue
         pred_col = label if label in merged.columns else f"{label}_pred"
         true_col = label if label in labels_df.columns and label in merged.columns else f"{label}_true"
         if pred_col not in merged.columns or true_col not in merged.columns:
@@ -135,7 +137,8 @@ def evaluate_subgroups(
         for subgroup_value, group in merged.groupby(subgroup_col):
             if len(group) < min_group_size:
                 continue
-            label_cols = list(labels or [c for c in labels_df.columns if c not in {image_column, *subgroup_columns}])
+            label_cols = [c for c in (labels if labels is not None else labels_df.columns)
+                          if c not in {image_column, *subgroup_columns} and c in pred_df.columns and c in labels_df.columns]
             group_labels = group[[image_column, *[f"{c}_true" if f"{c}_true" in group.columns else c for c in label_cols]]].copy()
             rename_map = {f"{c}_true": c for c in label_cols if f"{c}_true" in group_labels.columns}
             group_labels = group_labels.rename(columns=rename_map)

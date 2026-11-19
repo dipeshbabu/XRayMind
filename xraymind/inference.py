@@ -33,8 +33,12 @@ def predict_image(
 ) -> Dict[str, Any]:
     """Run multi-label chest X-ray prediction and return a structured result."""
 
-    model = load_model(model_name)
+    if top_k < 1:
+        raise ValueError("top_k must be at least 1")
+    if not 0.0 <= threshold <= 1.0:
+        raise ValueError("threshold must be between 0 and 1")
     tensor = prepare_xray_tensor(image)
+    model = load_model(model_name)
 
     with torch.no_grad():
         raw = model(tensor)[0].detach().cpu().numpy()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -158,13 +159,18 @@ def save_html_report(
 
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    def media_reference(media_path):
+        if media_path is None:
+            return None
+        return Path(os.path.relpath(Path(media_path).resolve(), path.parent.resolve())).as_posix()
+
     path.write_text(
         prediction_to_html(
             prediction,
-            heatmap_path=heatmap_path,
-            original_path=original_path,
-            overlay_path=overlay_path,
-            side_by_side_path=side_by_side_path,
+            heatmap_path=media_reference(heatmap_path),
+            original_path=media_reference(original_path),
+            overlay_path=media_reference(overlay_path),
+            side_by_side_path=media_reference(side_by_side_path),
             image_id=image_id,
             report_title=report_title,
         ),

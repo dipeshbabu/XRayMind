@@ -93,7 +93,9 @@ def selective_curve_for_label(
     if len(confidence_arr) != len(y_true_arr):
         raise ValueError("confidence must have the same length as y_true")
     order = np.argsort(-confidence_arr)
-    grid = list(coverage_grid or np.round(np.linspace(0.1, 1.0, 10), 2))
+    grid = list(coverage_grid if coverage_grid is not None else np.round(np.linspace(0.1, 1.0, 10), 2))
+    if any(not 0.0 < float(coverage) <= 1.0 for coverage in grid):
+        raise ValueError("coverage values must be greater than 0 and at most 1")
     rows: List[Dict[str, float | int | str | None]] = []
 
     for coverage in grid:
@@ -134,7 +136,7 @@ def evaluate_selective_predictions(
     labels: Sequence[str] | None = None,
     threshold: float = 0.5,
     coverage_grid: Sequence[float] | None = None,
-    confidence_suffix: str = "_confidence",
+    confidence_suffix: str | None = "_confidence",
     uncertainty_suffix: str | None = None,
     uncertainty_weight: float = 0.5,
 ) -> pd.DataFrame:
@@ -150,6 +152,8 @@ def evaluate_selective_predictions(
     label_names = list(labels or [c for c in labels_df.columns if c != image_column])
     frames: List[pd.DataFrame] = []
     for label in label_names:
+        if label not in labels_df.columns or label not in pred_df.columns:
+            continue
         true_col = f"{label}_true" if f"{label}_true" in merged.columns else label
         pred_col = f"{label}_pred" if f"{label}_pred" in merged.columns else label
         conf_col = f"{label}{confidence_suffix}"
@@ -161,7 +165,7 @@ def evaluate_selective_predictions(
         if len(set(y_true.tolist())) < 2:
             continue
         confidence = None
-        if conf_col in merged.columns:
+        if confidence_suffix is not None and conf_col in merged.columns:
             confidence = merged[conf_col].astype(float).to_numpy()
         elif uncertainty_col and uncertainty_col in merged.columns:
             confidence = combined_confidence(

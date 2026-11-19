@@ -64,9 +64,7 @@ class SQLiteStore:
     def initialize(self) -> None:
         """Create database tables and run additive schema migrations."""
 
-        with sqlite3.connect(self.path) as conn:
-            conn.row_factory = dict_factory
-            conn.execute("PRAGMA foreign_keys = ON")
+        with self.connect() as conn:
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS metadata (

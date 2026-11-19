@@ -173,6 +173,8 @@ def create_case_with_prediction(
     """Create a case, run inference, and persist the prediction."""
 
     store = _coerce_store(store, db_path)
+    priority = _validate_choice(priority, VALID_PRIORITIES, "priority")
+    prediction = predict_image(image_path, model_name=model_name, top_k=top_k, threshold=threshold)
     case = create_case(
         image_path,
         image_id=image_id,
@@ -186,7 +188,6 @@ def create_case_with_prediction(
         needs_second_reader=needs_second_reader,
         store=store,
     )
-    prediction = predict_image(image_path, model_name=model_name, top_k=top_k, threshold=threshold)
     saved_prediction = save_prediction_for_case(
         case["id"],
         prediction,
@@ -296,6 +297,8 @@ def update_case_status(
 
     status = _validate_choice(status, VALID_CASE_STATUSES, "status")
     store = _coerce_store(store, db_path)
+    if get_case(case_id, store=store) is None:
+        raise KeyError(f"Case {case_id} not found")
     store.execute(
         "UPDATE cases SET status = ?, updated_at = ? WHERE id = ?",
         (status, utc_now_iso(), int(case_id)),
@@ -357,7 +360,16 @@ def add_review(
     """Add a human review and update case status."""
 
     decision = _validate_choice(decision, VALID_REVIEW_DECISIONS, "decision")
+    if final_labels is not None and not isinstance(final_labels, dict):
+        raise ValueError("final_labels must be a JSON object")
+    if next_status is None:
+        next_status = "deferred" if decision == "defer" else "flagged" if decision == "flag" else "reviewed"
+    next_status = _validate_choice(next_status, VALID_CASE_STATUSES, "status")
+    if review_round is not None and int(review_round) < 1:
+        raise ValueError("review_round must be at least 1")
     store = _coerce_store(store, db_path)
+    if get_case(case_id, store=store) is None:
+        raise KeyError(f"Case {case_id} not found")
     now = utc_now_iso()
     if review_round is None:
         prior = store.fetch_one("SELECT COUNT(*) AS count FROM reviews WHERE case_id = ?", (int(case_id),)) or {}
@@ -369,8 +381,6 @@ def add_review(
         """,
         (int(case_id), reviewer, decision, notes, dumps_json(final_labels or {}), int(review_round), now),
     )
-    if next_status is None:
-        next_status = "deferred" if decision == "defer" else "flagged" if decision == "flag" else "reviewed"
     needs_second_reader = decision in SECOND_READER_DECISIONS and int(review_round) == 1
     store.execute(
         """

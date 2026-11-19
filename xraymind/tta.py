@@ -35,6 +35,8 @@ def predict_with_tta(
     calibrated clinical uncertainty estimator.
     """
 
+    if top_k < 1:
+        raise ValueError("top_k must be at least 1")
     predictions = []
     labels = None
     for variant in _variants(image):
@@ -42,7 +44,10 @@ def predict_with_tta(
         rows = result["predictions"]
         if labels is None:
             labels = [row["label"] for row in rows]
-        predictions.append([row["probability"] for row in rows])
+        probabilities = {row["label"]: row["probability"] for row in rows}
+        if set(probabilities) != set(labels):
+            raise ValueError("All augmentations must predict the same labels")
+        predictions.append([probabilities[label] for label in labels])
 
     scores = np.asarray(predictions, dtype=float)
     labels = labels or []
